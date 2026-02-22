@@ -25,8 +25,8 @@ impl LinearClient {
         identifier: &str,
     ) -> Result<LinearIssueData, String> {
         let query = r#"
-            query IssueByIdentifier($identifier: String!) {
-                issues(filter: { identifier: { eq: $identifier } }, first: 1) {
+            query IssueByIdentifier($query: String!) {
+                issueSearch(query: $query, first: 1) {
                     nodes {
                         title
                         description
@@ -46,7 +46,7 @@ impl LinearClient {
             .header("Authorization", &self.api_key)
             .json(&json!({
                 "query": query,
-                "variables": { "identifier": identifier }
+                "variables": { "query": identifier }
             }))
             .send()
             .await
@@ -63,7 +63,7 @@ impl LinearClient {
 
         let issue_value = body
             .get("data")
-            .and_then(|d| d.get("issues"))
+            .and_then(|d| d.get("issueSearch"))
             .and_then(|i| i.get("nodes"))
             .and_then(|n| n.get(0))
             .ok_or_else(|| format!("no issue found for identifier '{identifier}' – body: {body}"))?;
