@@ -22,11 +22,22 @@ impl LinearClient {
 
     pub async fn fetch_issue_by_identifier(
         &self,
-        identifier: &str,
+        identifier: &str, // e.g. "ABX-16"
     ) -> Result<LinearIssueData, String> {
+        // Parse "ABX-16" → team_key = "ABX", number = 16
+        let (team_key, number_str) = identifier
+            .rsplit_once('-')
+            .ok_or_else(|| format!("invalid identifier format: {identifier}"))?;
+        let number: u32 = number_str
+            .parse()
+            .map_err(|_| format!("invalid issue number in identifier: {identifier}"))?;
+
         let query = r#"
-            query IssueByIdentifier($query: String!) {
-                issueSearch(query: $query, first: 1) {
+            query IssueByNumber($teamKey: String!, $number: Float!) {
+                issues(filter: {
+                    number: { eq: $number },
+                    team: { key: { eq: $teamKey } }
+                }, first: 1) {
                     nodes {
                         title
                         description
@@ -46,7 +57,10 @@ impl LinearClient {
             .header("Authorization", &self.api_key)
             .json(&json!({
                 "query": query,
-                "variables": { "query": identifier }
+                "variables": {
+                    "teamKey": team_key,
+                    "number": number
+                }
             }))
             .send()
             .await
@@ -63,7 +77,7 @@ impl LinearClient {
 
         let issue_value = body
             .get("data")
-            .and_then(|d| d.get("issueSearch"))
+            .and_then(|d| d.get("issues"))
             .and_then(|i| i.get("nodes"))
             .and_then(|n| n.get(0))
             .ok_or_else(|| format!("no issue found for identifier '{identifier}' – body: {body}"))?;
