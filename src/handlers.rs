@@ -296,13 +296,33 @@ async fn handle_link_preview(
 
     match linear.fetch_issue_by_identifier(&identifier).await {
         Ok(issue) => {
+            let inline_title = format!("[{}] {}", issue.identifier, issue.title);
             let card = build_preview_card(&issue);
-            // url.preview.get expects {"card": { header, elements }}
-            (StatusCode::OK, Json(serde_json::json!({ "card": card })))
+            info!("built preview card for {identifier}: {inline_title}");
+            // url.preview.get response format (per Lark internal docs):
+            //   inline  – required text-link preview
+            //   card    – optional card preview; type "raw" = full card JSON in data
+            (StatusCode::OK, Json(serde_json::json!({
+                "inline": {
+                    "i18n_title": {
+                        "en_us": inline_title,
+                        "zh_cn": inline_title,
+                    }
+                },
+                "card": {
+                    "type": "raw",
+                    "data": card
+                }
+            })))
         }
         Err(e) => {
             error!("failed to fetch Linear issue {identifier}: {e}");
-            (StatusCode::OK, Json(serde_json::json!({})))
+            // inline is required even on error — return identifier as fallback
+            (StatusCode::OK, Json(serde_json::json!({
+                "inline": {
+                    "i18n_title": { "en_us": identifier }
+                }
+            })))
         }
     }
 }
