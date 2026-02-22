@@ -246,6 +246,9 @@ pub async fn lark_event_handler(
         }
     }
 
+    // Log full event body so we can inspect event_type and structure
+    info!("lark event received: {body_value}");
+
     // Handle URL preview event
     let event_type = body_value
         .get("header")
@@ -253,11 +256,11 @@ pub async fn lark_event_handler(
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    if event_type == "im.message.link_preview.pull" {
+    if event_type == "url.preview.get" {
         return handle_link_preview(&state, &body_value).await;
     }
 
-    info!("ignoring lark event type: {event_type}");
+    info!("ignoring lark event type: '{event_type}' – add handler if needed");
     (StatusCode::OK, Json(serde_json::json!({})))
 }
 
@@ -294,18 +297,8 @@ async fn handle_link_preview(
     match linear.fetch_issue_by_identifier(&identifier).await {
         Ok(issue) => {
             let card = build_preview_card(&issue);
-            // Return the card in Lark's expected format
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "preview": {
-                        "template": {
-                            "type": "interactive",
-                            "data": card
-                        }
-                    }
-                })),
-            )
+            // url.preview.get expects {"card": { header, elements }}
+            (StatusCode::OK, Json(serde_json::json!({ "card": card })))
         }
         Err(e) => {
             error!("failed to fetch Linear issue {identifier}: {e}");
