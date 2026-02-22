@@ -25,15 +25,17 @@ impl LinearClient {
         identifier: &str,
     ) -> Result<LinearIssueData, String> {
         let query = r#"
-            query IssueByIdentifier($id: String!) {
-                issue(id: $id) {
-                    title
-                    description
-                    priority
-                    identifier
-                    url
-                    state { name }
-                    assignee { name }
+            query IssueByIdentifier($identifier: String!) {
+                issues(filter: { identifier: { eq: $identifier } }, first: 1) {
+                    nodes {
+                        title
+                        description
+                        priority
+                        identifier
+                        url
+                        state { name }
+                        assignee { name }
+                    }
                 }
             }
         "#;
@@ -44,7 +46,7 @@ impl LinearClient {
             .header("Authorization", &self.api_key)
             .json(&json!({
                 "query": query,
-                "variables": { "id": identifier }
+                "variables": { "identifier": identifier }
             }))
             .send()
             .await
@@ -61,8 +63,10 @@ impl LinearClient {
 
         let issue_value = body
             .get("data")
-            .and_then(|d| d.get("issue"))
-            .ok_or_else(|| "missing data.issue in Linear response".to_string())?;
+            .and_then(|d| d.get("issues"))
+            .and_then(|i| i.get("nodes"))
+            .and_then(|n| n.get(0))
+            .ok_or_else(|| format!("no issue found for identifier '{identifier}' – body: {body}"))?;
 
         serde_json::from_value(issue_value.clone())
             .map_err(|e| format!("failed to deserialize Linear issue: {e}"))
