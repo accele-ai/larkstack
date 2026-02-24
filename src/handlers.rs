@@ -10,6 +10,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     config::AppState,
+    debounce::{PendingUpdate, DEBOUNCE_MS},
     lark::{build_assign_dm_card, build_lark_card, CardEvent},
     linear::{build_preview_card, extract_identifier_from_url},
     models::{Actor, CommentData, Issue, LinearPayload, UpdatedFrom},
@@ -89,7 +90,7 @@ pub async fn webhook_handler(
             let changes = build_change_fields(&issue, &payload.updated_from);
 
             info!(
-                "processing Issue update – {} {} (changes: {})",
+                "queuing debounced Issue update – {} {} (changes: {})",
                 issue.identifier,
                 issue.title,
                 if changes.is_empty() {
@@ -99,27 +100,73 @@ pub async fn webhook_handler(
                 }
             );
 
-            let card_msg = build_lark_card(&CardEvent::IssueUpdated {
-                issue: &issue,
-                url: &payload.url,
-                changes: changes.clone(),
+            // Resolve DM email if the assignee changed in this update.
+            let dm_email: Option<String> = payload.updated_from.as_ref().and_then(|uf| {
+                serde_json::from_value::<UpdatedFrom>(uf.clone())
+                    .ok()
+                    .and_then(|uf| {
+                        if uf.assignee_id.is_some() {
+                            issue.assignee.as_ref().and_then(|a| a.email.clone())
+                        } else {
+                            None
+                        }
+                    })
             });
 
-            // Phase 2: DM new assignee if assignee changed
-            if let Some(ref uf) = payload.updated_from {
-                let uf_parsed: Result<UpdatedFrom, _> = serde_json::from_value(uf.clone());
-                if let Ok(updated_from) = uf_parsed {
-                    if updated_from.assignee_id.is_some() {
-                        if let Some(ref assignee) = issue.assignee {
-                            if let Some(ref email) = assignee.email {
-                                try_dm_assignee(&state, &issue, &payload.url, email).await;
+            let issue_id = issue.id.clone();
+
+            // Merge with any pending update for this issue and (re)start the timer.
+            let cancel_rx = {
+                let mut map = state.update_debounce.0.lock().await;
+
+                let (merged_changes, merged_dm_email) =
+                    if let Some(existing) = map.remove(&issue_id) {
+                        // Cancel the old timer task.
+                        let _ = existing.cancel_tx.send(());
+                        // Accumulate change descriptions; skip exact duplicates.
+                        let mut all = existing.changes;
+                        for c in &changes {
+                            if !all.contains(c) {
+                                all.push(c.clone());
                             }
                         }
+                        // Prefer the latest DM email if present.
+                        (all, dm_email.or(existing.dm_email))
+                    } else {
+                        (changes, dm_email)
+                    };
+
+                let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+                map.insert(
+                    issue_id.clone(),
+                    PendingUpdate {
+                        issue,
+                        url: payload.url.clone(),
+                        changes: merged_changes,
+                        dm_email: merged_dm_email,
+                        cancel_tx,
+                    },
+                );
+                cancel_rx
+            };
+
+            // Spawn the timer task; whichever fires first wins.
+            let state2 = Arc::clone(&state);
+            tokio::spawn(async move {
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(DEBOUNCE_MS)) => {
+                        let pending = state2.update_debounce.0.lock().await.remove(&issue_id);
+                        if let Some(p) = pending {
+                            send_update_notification(&state2, p).await;
+                        }
+                    }
+                    _ = cancel_rx => {
+                        // A newer update cancelled this task; the replacement task will fire.
                     }
                 }
-            }
+            });
 
-            card_msg
+            return StatusCode::OK;
         }
         ("Comment", "create") => {
             let comment: CommentData = match serde_json::from_value(payload.data.clone()) {
@@ -181,6 +228,43 @@ pub async fn webhook_handler(
     }
 
     StatusCode::OK
+}
+
+// ---------------------------------------------------------------------------
+// Debounced update sender
+// ---------------------------------------------------------------------------
+
+async fn send_update_notification(state: &AppState, pending: PendingUpdate) {
+    let PendingUpdate { issue, url, changes, dm_email, .. } = pending;
+
+    info!(
+        "sending debounced update for {} – changes: {}",
+        issue.identifier,
+        if changes.is_empty() { "none".to_string() } else { changes.join(", ") }
+    );
+
+    let card_msg = build_lark_card(&CardEvent::IssueUpdated {
+        issue: &issue,
+        url: &url,
+        changes,
+    });
+
+    match state.http.post(&state.lark_webhook_url).json(&card_msg).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if status.is_success() {
+                info!("lark update notification sent: {text}");
+            } else {
+                error!("lark returned {status}: {text}");
+            }
+        }
+        Err(e) => error!("failed to send lark notification: {e}"),
+    }
+
+    if let Some(ref email) = dm_email {
+        try_dm_assignee(state, &issue, &url, email).await;
+    }
 }
 
 // ---------------------------------------------------------------------------
