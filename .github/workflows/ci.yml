@@ -1,0 +1,48 @@
+name: Rust CI
+
+# 触发条件：当向 main 分支 push 代码，或者提交 PR 时触发
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# 环境变量：让云端终端输出带颜色的日志，更易读
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_and_test:
+    name: Build and Test
+    runs-on: ubuntu-latest # 分配一台最新的 Ubuntu 云端机器
+
+    steps:
+      # 1. 把你的代码拉取到这台云端机器上
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 安装稳定的 Rust 工具链，并带上 fmt 和 clippy 组件
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # 3. 开启 Rust 缓存，避免每次都重新编译依赖（比如巨大的 tokio 和 reqwest），极大提升 CI 速度
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      # 4. 检查是否能成功编译
+      - name: Check compilation
+        run: cargo check
+
+      # 5. 检查代码格式（与本地 pre-commit 规则一致）
+      - name: Check format
+        run: cargo fmt --all -- --check
+
+      # 6. 运行 Clippy 规范检查（同样把 warning 视为 error）
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # 7. 运行所有的单元测试和集成测试
+      - name: Run tests
+        run: cargo test
