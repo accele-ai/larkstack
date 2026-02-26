@@ -4,17 +4,17 @@
 
 <br>
 
-<h1 align="center">Linear-Lark-Bridge 🌉</h1>
+<h1 align="center">LarkStack-Linear </h1>
 
 <p align="center">
-  A high-performance middleware syncing Linear issues to Lark via Rust.
+  A high-performance, type-safe middleware written in <strong>Rust</strong> that integrates <a href="https://linear.app/">Linear</a> with <a href="https://larksuite.com/">Lark / Feishu</a>.
   <br>
-  Built with Axum & Tokio for zero-delay workspace integration.
+  Built with Axum 0.8 & Tokio for zero-delay workspace integration.
 </p>
 
 <p align="center">
-  <a href="https://github.com/your-username/Linear-Lark-Bridge/actions"><img src="https://github.com/your-username/Linear-Lark-Bridge/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
-  <img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust Version">
+  <a href="https://github.com/your-username/LarkStack-Linear/actions"><img src="https://github.com/your-username/LarkStack-Linear/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
+  <img src="https://img.shields.io/badge/Rust-2021_Edition-orange.svg" alt="Rust Version">
   <img src="https://img.shields.io/badge/Deployment-Railway-black.svg" alt="Railway">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
 </p>
@@ -23,46 +23,69 @@
 
 ## ✨ Features
 
-- ⚡️ **Real-time Sync**: Receives Linear Webhooks, verifies HMAC-SHA256 signatures, and pushes highly customized Interactive Cards to Lark groups in milliseconds.
-- 🎯 **Direct Messaging**: Automatically extracts `assignee.email` from the payload to send direct messages via the Lark Bot API—no manual ID mapping required!
-- 🔗 **Link Previews**: Natively supports Lark's Challenge handshake protocol. Pasting a Linear link in Lark instantly renders a rich context card.
-- 🚀 **Cloud Native**: Ships with a multi-stage `Dockerfile` optimized for zero-config deployment on PaaS platforms like Railway.
-- 🔮 **Future-Proof Architecture**: Designed with decoupled event-driven routing, paving the way for the ultimate **Lark Integration Hub** (supporting GitHub, Telegram, etc. in the future).
+- 📢 **Group Notifications (Phase 1)**: Automatically pushes Interactive Cards to a designated Lark group when Linear Issues are created or updated. Cards are color-coded based on priority. Includes a **500ms DebounceMap** window to coalesce rapid-fire updates and prevent notification spam.
+
+<p align="center">
+  <img src="./docs/images/lark-update-card.png" width="600" alt="Lark Update Card Showcase">
+  <br>
+  <sup><i>Real-time Linear issue updates delivered to Lark via Interactive Cards.</i></sup>
+</p>
+
+- 👤 **Direct Message on Assign (Phase 2)**: Automatically sends a private DM to a team member when an issue is assigned to them. Matches the assignee's Linear email with their Lark account email natively—no manual ID mapping required!
+- 🔗 **Rich Link Previews (Phase 3)**: When a user pastes a `linear.app` link in Lark, the bridge handles Lark's `url_verification` challenge, fetches issue details via Linear's GraphQL API, and unfurls the link into a detailed summary card.
+- 🛡️ **Secure by Default**: Implements strict HMAC-SHA256 signature verification for Linear webhooks and natively handles Lark's Event callbacks.
+
+## 🏗️ Architecture & Tech Stack
+
+Following a robust refactoring, the codebase is highly modularized:
+- **Framework**: `axum 0.8` + `tokio` (Async runtime) + `reqwest 0.12`.
+- **Handlers**: Clean separation between `POST /webhook` (Linear) and `POST /lark/event` (Lark callbacks).
+- **Lark Module**: Decoupled `cards.rs` (pure UI builders) and `bot.rs` (tenant token caching & HTTP client).
+
+### API Endpoints
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| `POST` | `/webhook` | Linear webhook receiver |
+| `POST` | `/lark/event` | Lark event callback (challenge + link preview) |
+| `GET`  | `/health` | Health check (returns `"ok"`) |
 
 ## ⚙️ Configuration
 
-Ensure the following environment variables are set before running the application:
+Ensure the following environment variables are set. 
 
-| Environment Variable | Platform | Required | Description |
-| :--- | :---: | :---: | :--- |
-| `LINEAR_WEBHOOK_SECRET` | Linear | ✅ | Used to verify the HMAC signature of incoming webhooks. |
-| `LINEAR_API_KEY` | Linear | ✅ | Used to fetch issue details for Link Previews. |
-| `LARK_APP_ID` | Lark | ✅ | Used to obtain the Tenant Access Token. |
-| `LARK_APP_SECRET` | Lark | ✅ | Used in conjunction with App ID for authentication. |
-| `LARK_VERIFICATION_TOKEN` | Lark | ✅ | Used to validate Lark's Event Callback (Challenge handshake). |
-| `PORT` | System | ❌ | Axum listening port (Defaults to 3000). |
+<p align="center">
+  <img src="./docs/images/linear-api-config.jpeg" width="600" alt="Linear API Configuration">
+  <br>
+  <sup><i>Configure your Webhook and API Keys in the Linear Workspace Settings.</i></sup>
+</p>
 
-## 🛠️ Local Development
+| Variable | Required | Description |
+| :--- | :---: | :--- |
+| `LINEAR_WEBHOOK_SECRET` | ✅ | Used for HMAC signature verification. |
+| `LINEAR_API_KEY` | For Phase 3 | GraphQL API access for link previews. |
+| `LARK_WEBHOOK_URL` | ✅ | Group notification target. |
+| `LARK_APP_ID` | For Phase 2 | Bot app ID for tenant token. |
+| `LARK_APP_SECRET` | For Phase 2 | Bot app secret. |
+| `LARK_VERIFICATION_TOKEN`| For Phase 3 | Lark event callback verification. |
+| `PORT` | ❌ | Defaults to `3000`. |
 
-1. **Clone & Setup:**
-   ```bash
-   git clone [https://github.com/your-username/Linear-Lark-Bridge.git](https://github.com/your-username/Linear-Lark-Bridge.git)
-   cd Linear-Lark-Bridge
-   cp .env.example .env # Fill in your development secrets
-2. **Network Routing (ngrok):**
-    Use ngrok http 3000 to expose your local server.
+## 🚀 Deployment (Railway)
 
-    ⚠️ Note for Surge users: If using Enhanced Mode (Fake IP), accessing your Railway/ngrok domains locally might cause 198.18.x.x routing conflicts. Configure direct connections for these domains.
+Optimized for [Railway](https://railway.app/) using a highly efficient multi-stage `Dockerfile` to keep the image size minimal and deployment times fast.
 
-3. **Pre-commit Gatekeeper:**
-    We enforce strict code quality using prek.
+<p align="center">
+  <img src="./docs/images/railway-vars.png" width="600" alt="Railway Variables Configuration">
+  <br>
+  <sup><i>Zero-config deployment: Just paste your environment variables into Railway.</i></sup>
+</p>
 
-    ```bash
-    cargo install prek
-    prek install
-    ```
-## 📦 Deployment
-    This project is optimized for Railway. Simply connect your GitHub repository to Railway, and the platform will automatically build and deploy the app using the provided multi-stage Dockerfile.
+## 💻 Local Development & Testing
 
-## 📄 License
-    MIT
+1. **Create a Test Environment**: Set up a private Lark group with a new Custom Bot and create a "Local Debug" webhook in Linear.
+2. **Start a Local Tunnel**: Expose your local server using `ngrok http 3000`.
+3. **Run the Server**: Use `cargo run` and point your Linear webhook to `https://<YOUR_NGROK_URL>/webhook`.
+4. **Code Quality**: This project uses `prek` (local `fmt`/`clippy` gatekeeper) and strict GitHub Actions (`cargo clippy -- -D warnings`) to enforce code standards.
+
+## 📝 License
+
+[MIT License](./LICENSE)
