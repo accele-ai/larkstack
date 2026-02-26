@@ -2,7 +2,8 @@ use reqwest::Client;
 use serde_json::json;
 
 use crate::{
-    models::{LinearIssueData, LarkCard, LarkHeader, LarkTitle},
+    lark::cards::{build_action_button, build_fields},
+    models::{LarkCard, LarkHeader, LarkTitle, LinearIssueData},
     utils::{priority_color, priority_display, truncate},
 };
 
@@ -80,7 +81,9 @@ impl LinearClient {
             .and_then(|d| d.get("issues"))
             .and_then(|i| i.get("nodes"))
             .and_then(|n| n.get(0))
-            .ok_or_else(|| format!("no issue found for identifier '{identifier}' – body: {body}"))?;
+            .ok_or_else(|| {
+                format!("no issue found for identifier '{identifier}' – body: {body}")
+            })?;
 
         serde_json::from_value(issue_value.clone())
             .map_err(|e| format!("failed to deserialize Linear issue: {e}"))
@@ -99,7 +102,7 @@ pub fn extract_identifier_from_url(url: &str) -> Option<String> {
                 if ident.contains('-')
                     && ident
                         .split('-')
-                        .last()
+                        .next_back()
                         .map(|n| n.chars().all(|c| c.is_ascii_digit()))
                         .unwrap_or(false)
                 {
@@ -142,42 +145,12 @@ pub fn build_preview_card(issue: &LinearIssueData) -> LarkCard {
         }
     }
 
-    elements.push(json!({
-        "tag": "div",
-        "fields": [
-            {
-                "is_short": true,
-                "text": {
-                    "tag": "lark_md",
-                    "content": format!("**Status:** {}", issue.state.name),
-                }
-            },
-            {
-                "is_short": true,
-                "text": {
-                    "tag": "lark_md",
-                    "content": format!("**Priority:** {}", priority_display(issue.priority)),
-                }
-            },
-            {
-                "is_short": true,
-                "text": {
-                    "tag": "lark_md",
-                    "content": format!("**Assignee:** {}", assignee),
-                }
-            }
-        ]
-    }));
-
-    elements.push(json!({
-        "tag": "action",
-        "actions": [{
-            "tag": "button",
-            "text": { "tag": "plain_text", "content": "View in Linear" },
-            "type": "primary",
-            "url": issue.url,
-        }]
-    }));
+    elements.push(build_fields(
+        &issue.state.name,
+        &priority_display(issue.priority),
+        Some(assignee),
+    ));
+    elements.push(build_action_button(&issue.url));
 
     LarkCard {
         header: LarkHeader {

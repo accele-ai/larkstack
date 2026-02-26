@@ -1,4 +1,5 @@
 mod config;
+mod debounce;
 mod handlers;
 mod lark;
 mod linear;
@@ -7,11 +8,15 @@ mod utils;
 
 use std::{env, sync::Arc};
 
-use axum::{Router, routing::{get, post}};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use reqwest::Client;
 use tracing::{info, warn};
 
 use config::AppState;
+use debounce::DebounceMap;
 use handlers::{health, lark_event_handler, webhook_handler};
 use lark::LarkBotClient;
 use linear::LinearClient;
@@ -20,8 +25,7 @@ use linear::LinearClient;
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -61,6 +65,7 @@ async fn main() {
         lark_bot,
         linear_client,
         lark_verification_token,
+        update_debounce: DebounceMap::new(),
     });
 
     let app = Router::new()

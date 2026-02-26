@@ -1,0 +1,48 @@
+name: Rust CI
+
+# Trigger: run on push to main or on pull requests targeting main
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# Force colored output in cargo logs for easier reading
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_and_test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Install the stable Rust toolchain with fmt and clippy components
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # 3. Cache compiled dependencies to speed up CI (avoids recompiling tokio, reqwest, etc.)
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      # 4. Verify the project compiles successfully
+      - name: Check compilation
+        run: cargo check
+
+      # 5. Enforce code formatting (mirrors local pre-commit rules)
+      - name: Check format
+        run: cargo fmt --all -- --check
+
+      # 6. Run Clippy lints — warnings are treated as errors
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # 7. Run all unit and integration tests
+      - name: Run tests
+        run: cargo test

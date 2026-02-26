@@ -1,6 +1,6 @@
 use reqwest::Client;
 
-use crate::{lark::LarkBotClient, linear::LinearClient};
+use crate::{debounce::DebounceMap, lark::LarkBotClient, linear::LinearClient};
 
 pub struct AppState {
     pub webhook_secret: String,
@@ -9,4 +9,5 @@ pub struct AppState {
     pub lark_bot: Option<LarkBotClient>,
     pub linear_client: Option<LinearClient>,
     pub lark_verification_token: Option<String>,
+    pub update_debounce: DebounceMap,
 }
