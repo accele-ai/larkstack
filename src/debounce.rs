@@ -4,12 +4,9 @@ use tokio::sync::{oneshot, Mutex};
 
 use crate::models::Issue;
 
-/// How long to wait after the last update before firing the notification.
-/// Burst duplicates from Linear arrive within ~100ms of each other; 500ms
-/// is comfortably above that while keeping notifications responsive.
-pub const DEBOUNCE_MS: u64 = 500;
-
 pub struct PendingUpdate {
+    /// Whether this debounce batch originated from a create event.
+    pub is_create: bool,
     /// Latest issue state (replaced on every new update for this issue).
     pub issue: Issue,
     pub url: String,
@@ -43,29 +40,34 @@ impl DebounceMap {
         url: String,
         changes: Vec<String>,
         dm_email: Option<String>,
+        is_create: bool,
     ) -> oneshot::Receiver<()> {
         let mut map = self.0.lock().await;
 
-        let (merged_changes, merged_dm_email) = if let Some(existing) = map.remove(&issue_id) {
-            // Cancel the old timer task.
-            let _ = existing.cancel_tx.send(());
-            // Accumulate change descriptions; skip exact duplicates.
-            let mut all = existing.changes;
-            for c in &changes {
-                if !all.contains(c) {
-                    all.push(c.clone());
+        let (merged_is_create, merged_changes, merged_dm_email) =
+            if let Some(existing) = map.remove(&issue_id) {
+                // Cancel the old timer task.
+                let _ = existing.cancel_tx.send(());
+                // A create followed by updates is still a "create".
+                let merged_create = existing.is_create || is_create;
+                // Accumulate change descriptions; skip exact duplicates.
+                let mut all = existing.changes;
+                for c in &changes {
+                    if !all.contains(c) {
+                        all.push(c.clone());
+                    }
                 }
-            }
-            // Prefer the latest DM email if present.
-            (all, dm_email.or(existing.dm_email))
-        } else {
-            (changes, dm_email)
-        };
+                // Prefer the latest DM email if present.
+                (merged_create, all, dm_email.or(existing.dm_email))
+            } else {
+                (is_create, changes, dm_email)
+            };
 
         let (cancel_tx, cancel_rx) = oneshot::channel();
         map.insert(
             issue_id,
             PendingUpdate {
+                is_create: merged_is_create,
                 issue,
                 url,
                 changes: merged_changes,

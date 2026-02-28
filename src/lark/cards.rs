@@ -65,6 +65,7 @@ pub enum CardEvent<'a> {
     IssueCreated {
         issue: &'a Issue,
         url: &'a str,
+        changes: Vec<String>,
     },
     IssueUpdated {
         issue: &'a Issue,
@@ -80,7 +81,11 @@ pub enum CardEvent<'a> {
 
 pub fn build_lark_card(event: &CardEvent) -> LarkMessage {
     match event {
-        CardEvent::IssueCreated { issue, url } => build_issue_created_card(issue, url),
+        CardEvent::IssueCreated {
+            issue,
+            url,
+            changes,
+        } => build_issue_created_card(issue, url, changes),
         CardEvent::IssueUpdated {
             issue,
             url,
@@ -94,7 +99,7 @@ pub fn build_lark_card(event: &CardEvent) -> LarkMessage {
     }
 }
 
-fn build_issue_created_card(issue: &Issue, url: &str) -> LarkMessage {
+fn build_issue_created_card(issue: &Issue, url: &str, changes: &[String]) -> LarkMessage {
     let color = priority_color(issue.priority);
     let assignee_name = issue
         .assignee
@@ -125,6 +130,18 @@ fn build_issue_created_card(issue: &Issue, url: &str) -> LarkMessage {
                 }
             }));
         }
+    }
+
+    // Change lines (populated when a create is merged with subsequent updates)
+    if !changes.is_empty() {
+        let change_text = changes.join("\n");
+        elements.push(json!({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": change_text,
+            }
+        }));
     }
 
     elements.push(build_fields(
