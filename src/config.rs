@@ -106,3 +106,30 @@ pub struct AppState {
     pub linear_client: Option<LinearClient>,
     pub update_debounce: DebounceMap,
 }
+
+impl AppState {
+    pub fn from_env() -> Self {
+        let linear = LinearConfig::from_env().expect("invalid linear config");
+        let lark = LarkConfig::from_env().expect("invalid lark config");
+        let server = ServerConfig::from_env().expect("invalid server config");
+
+        let http = Client::new();
+        let lark_bot = lark.bot_client(&http);
+        let linear_client = linear.graphql_client(&http);
+
+        if lark.verification_token.is_some() {
+            info!("LARK_VERIFICATION_TOKEN set – event verification enabled");
+        }
+        info!("debounce delay: {}ms", server.debounce_delay_ms);
+
+        Self {
+            linear,
+            lark,
+            server,
+            http,
+            lark_bot,
+            linear_client,
+            update_debounce: DebounceMap::new(),
+        }
+    }
+}

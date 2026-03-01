@@ -12,11 +12,9 @@ use axum::{
     Router,
     routing::{get, post},
 };
-use reqwest::Client;
 use tracing::info;
 
-use config::{AppState, LarkConfig, LinearConfig, ServerConfig};
-use debounce::DebounceMap;
+use config::AppState;
 
 async fn health() -> &'static str {
     "ok"
@@ -30,31 +28,8 @@ async fn main() {
         )
         .init();
 
-    let linear = LinearConfig::from_env().expect("invalid linear config");
-    let lark = LarkConfig::from_env().expect("invalid lark config");
-    let server = ServerConfig::from_env().expect("invalid server config");
-
-    let http = Client::new();
-    let lark_bot = lark.bot_client(&http);
-    let linear_client = linear.graphql_client(&http);
-
-    if lark.verification_token.is_some() {
-        info!("LARK_VERIFICATION_TOKEN set – event verification enabled");
-    }
-
-    info!("debounce delay: {}ms", server.debounce_delay_ms);
-
-    let addr = format!("0.0.0.0:{}", server.port);
-
-    let state = Arc::new(AppState {
-        linear,
-        lark,
-        server,
-        http,
-        lark_bot,
-        linear_client,
-        update_debounce: DebounceMap::new(),
-    });
+    let state = Arc::new(AppState::from_env());
+    let addr = format!("0.0.0.0:{}", state.server.port);
 
     let app = Router::new()
         .route("/webhook", post(sources::linear::webhook_handler))
