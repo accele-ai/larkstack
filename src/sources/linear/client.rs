@@ -1,16 +1,11 @@
+//! Linear GraphQL API client for fetching issue data (used by link previews).
+
 use reqwest::Client;
 use serde_json::json;
 
-use crate::{
-    lark::cards::{build_action_button, build_fields},
-    models::{LarkCard, LarkHeader, LarkTitle, LinearIssueData},
-    utils::{priority_color, priority_display, truncate},
-};
+use super::models::LinearIssueData;
 
-// ---------------------------------------------------------------------------
-// Phase 3: Linear GraphQL client
-// ---------------------------------------------------------------------------
-
+/// Client for the Linear GraphQL API.
 pub struct LinearClient {
     api_key: String,
     http: Client,
@@ -21,11 +16,11 @@ impl LinearClient {
         Self { api_key, http }
     }
 
+    /// Fetches a single issue by its identifier (e.g. `"ABX-16"`).
     pub async fn fetch_issue_by_identifier(
         &self,
-        identifier: &str, // e.g. "ABX-16"
+        identifier: &str,
     ) -> Result<LinearIssueData, String> {
-        // Parse "ABX-16" → team_key = "ABX", number = 16
         let (team_key, number_str) = identifier
             .rsplit_once('-')
             .ok_or_else(|| format!("invalid identifier format: {identifier}"))?;
@@ -90,76 +85,21 @@ impl LinearClient {
     }
 }
 
-/// Extract issue identifier from a Linear URL like
-/// `https://linear.app/workspace/issue/LIN-123/some-slug`
+/// Extracts an issue identifier (e.g. `"LIN-123"`) from a Linear URL like
+/// `https://linear.app/workspace/issue/LIN-123/some-slug`.
 pub fn extract_identifier_from_url(url: &str) -> Option<String> {
-    // Match /issue/IDENT pattern
     let parts: Vec<&str> = url.split('/').collect();
     for (i, part) in parts.iter().enumerate() {
-        if *part == "issue" {
-            if let Some(ident) = parts.get(i + 1) {
-                // Identifier looks like "TEAM-123"
-                if ident.contains('-')
-                    && ident
-                        .split('-')
-                        .next_back()
-                        .map(|n| n.chars().all(|c| c.is_ascii_digit()))
-                        .unwrap_or(false)
-                {
-                    return Some(ident.to_string());
-                }
-            }
+        if *part == "issue"
+            && let Some(ident) = parts.get(i + 1)
+            && ident.contains('-')
+            && ident
+                .split('-')
+                .next_back()
+                .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+        {
+            return Some(ident.to_string());
         }
     }
     None
-}
-
-pub fn build_preview_card(issue: &LinearIssueData) -> LarkCard {
-    let color = priority_color(issue.priority);
-    let assignee = issue
-        .assignee
-        .as_ref()
-        .map(|a| a.name.as_str())
-        .unwrap_or("Unassigned");
-
-    let mut elements = vec![];
-
-    elements.push(json!({
-        "tag": "div",
-        "text": {
-            "tag": "lark_md",
-            "content": format!("**{}**", issue.title),
-        }
-    }));
-
-    if let Some(desc) = &issue.description {
-        let trimmed = desc.trim();
-        if !trimmed.is_empty() {
-            elements.push(json!({
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": truncate(trimmed, 200),
-                }
-            }));
-        }
-    }
-
-    elements.push(build_fields(
-        &issue.state.name,
-        &priority_display(issue.priority),
-        Some(assignee),
-    ));
-    elements.push(build_action_button(&issue.url));
-
-    LarkCard {
-        header: LarkHeader {
-            template: color.to_string(),
-            title: LarkTitle {
-                content: format!("[Linear] {}", issue.identifier),
-                tag: "plain_text",
-            },
-        },
-        elements,
-    }
 }

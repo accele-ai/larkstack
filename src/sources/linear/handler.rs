@@ -1,3 +1,6 @@
+//! Axum handler for `POST /webhook` — receives Linear webhook payloads,
+//! converts them to [`Event`]s, and feeds them through debounce / dispatch.
+
 use std::sync::Arc;
 
 use axum::{
@@ -10,23 +13,26 @@ use tracing::{error, info, warn};
 use crate::{
     config::AppState,
     debounce::PendingUpdate,
-    lark::{build_lark_card, CardEvent},
+    dispatch,
+    event::{Event, Priority},
+};
+
+use super::{
     models::{Actor, CommentData, Issue, LinearPayload, UpdatedFrom},
     utils::{build_change_fields, verify_signature},
 };
 
-use super::send_lark_card;
-
-// ---------------------------------------------------------------------------
-// Webhook handler
-// ---------------------------------------------------------------------------
-
+/// Handles incoming Linear webhook requests.
+///
+/// 1. Verifies the `linear-signature` HMAC header.
+/// 2. Deserializes the [`LinearPayload`].
+/// 3. Converts to an [`Event`] and either debounces (issues) or dispatches
+///    immediately (comments).
 pub async fn webhook_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    // 1. Signature verification
     let signature = match headers
         .get("linear-signature")
         .and_then(|v| v.to_str().ok())
@@ -43,7 +49,6 @@ pub async fn webhook_handler(
         return StatusCode::UNAUTHORIZED;
     }
 
-    // 2. Deserialize payload
     let payload: LinearPayload = match serde_json::from_slice(&body) {
         Ok(p) => p,
         Err(e) => {
@@ -52,8 +57,7 @@ pub async fn webhook_handler(
         }
     };
 
-    // 3. Dispatch based on (kind, action)
-    let card = match (payload.kind.as_str(), payload.action.as_str()) {
+    match (payload.kind.as_str(), payload.action.as_str()) {
         ("Issue", "create") => {
             let issue: Issue = match serde_json::from_value(payload.data.clone()) {
                 Ok(i) => i,
@@ -68,19 +72,13 @@ pub async fn webhook_handler(
             );
 
             let dm_email = issue.assignee.as_ref().and_then(|a| a.email.clone());
-
             let issue_id = issue.id.clone();
+
+            let event = issue_to_event(&issue, &payload.url, vec![], true);
 
             let cancel_rx = state
                 .update_debounce
-                .upsert(
-                    issue_id.clone(),
-                    issue,
-                    payload.url.clone(),
-                    vec![],
-                    dm_email,
-                    true,
-                )
+                .upsert(issue_id.clone(), event, dm_email)
                 .await;
 
             let state2 = Arc::clone(&state);
@@ -96,7 +94,7 @@ pub async fn webhook_handler(
                 }
             });
 
-            return StatusCode::OK;
+            StatusCode::OK
         }
         ("Issue", "update") => {
             let issue: Issue = match serde_json::from_value(payload.data.clone()) {
@@ -120,7 +118,6 @@ pub async fn webhook_handler(
                 }
             );
 
-            // Resolve DM email if the assignee changed in this update.
             let dm_email: Option<String> = payload.updated_from.as_ref().and_then(|uf| {
                 serde_json::from_value::<UpdatedFrom>(uf.clone())
                     .ok()
@@ -135,16 +132,11 @@ pub async fn webhook_handler(
 
             let issue_id = issue.id.clone();
 
+            let event = issue_to_event(&issue, &payload.url, changes, false);
+
             let cancel_rx = state
                 .update_debounce
-                .upsert(
-                    issue_id.clone(),
-                    issue,
-                    payload.url.clone(),
-                    changes,
-                    dm_email,
-                    false,
-                )
+                .upsert(issue_id.clone(), event, dm_email)
                 .await;
 
             let state2 = Arc::clone(&state);
@@ -160,7 +152,7 @@ pub async fn webhook_handler(
                 }
             });
 
-            return StatusCode::OK;
+            StatusCode::OK
         }
         ("Comment", "create") => {
             let comment: CommentData = match serde_json::from_value(payload.data.clone()) {
@@ -171,81 +163,107 @@ pub async fn webhook_handler(
                 }
             };
 
-            // Try to get actor from the top-level payload (Linear sends it sometimes)
             let actor: Option<Actor> = payload
                 .data
                 .get("user")
                 .and_then(|u| serde_json::from_value(u.clone()).ok());
 
-            let issue_ref = comment
+            let identifier = comment
                 .issue
                 .as_ref()
-                .map(|i| i.identifier.as_str())
-                .unwrap_or("?");
-            info!("processing Comment create on {}", issue_ref);
+                .map(|i| i.identifier.clone())
+                .unwrap_or_else(|| "?".into());
+            let issue_title = comment
+                .issue
+                .as_ref()
+                .map(|i| i.title.clone())
+                .unwrap_or_default();
+            let author = actor
+                .map(|a| a.name)
+                .unwrap_or_else(|| "Someone".into());
 
-            build_lark_card(&CardEvent::CommentCreated {
-                comment: &comment,
-                url: &payload.url,
-                actor: actor.as_ref(),
-            })
+            info!("processing Comment create on {identifier}");
+
+            let event = Event::CommentCreated {
+                source: "linear".into(),
+                identifier,
+                issue_title,
+                author,
+                body: comment.body,
+                url: payload.url,
+            };
+
+            dispatch::dispatch(&event, &state, None).await;
+            StatusCode::OK
         }
         _ => {
             info!(
                 "ignoring event: type={}, action={}",
                 payload.kind, payload.action
             );
-            return StatusCode::OK;
+            StatusCode::OK
         }
-    };
-
-    // 4. Send Lark group card
-    send_lark_card(&state, &card).await;
-    StatusCode::OK
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Debounced notification sender (handles both create and update)
-// ---------------------------------------------------------------------------
-
-async fn send_debounced_notification(state: &AppState, pending: PendingUpdate) {
-    let PendingUpdate {
-        is_create,
-        issue,
-        url,
+/// Converts a Linear [`Issue`] into an [`Event`].
+fn issue_to_event(issue: &Issue, url: &str, changes: Vec<String>, is_create: bool) -> Event {
+    let fields = (
+        "linear".to_string(),
+        issue.identifier.clone(),
+        issue.title.clone(),
+        issue.description.clone(),
+        issue.state.name.clone(),
+        Priority::from_linear(issue.priority),
+        issue.assignee.as_ref().map(|a| a.name.clone()),
+        issue.assignee.as_ref().and_then(|a| a.email.clone()),
+        url.to_string(),
         changes,
-        dm_email,
-        ..
-    } = pending;
-
-    let kind = if is_create { "create" } else { "update" };
-    info!(
-        "sending debounced {kind} for {} – changes: {}",
-        issue.identifier,
-        if changes.is_empty() {
-            "none".to_string()
-        } else {
-            changes.join(", ")
-        }
     );
 
-    let card_msg = if is_create {
-        build_lark_card(&CardEvent::IssueCreated {
-            issue: &issue,
-            url: &url,
-            changes,
-        })
+    if is_create {
+        Event::IssueCreated {
+            source: fields.0,
+            identifier: fields.1,
+            title: fields.2,
+            description: fields.3,
+            status: fields.4,
+            priority: fields.5,
+            assignee: fields.6,
+            assignee_email: fields.7,
+            url: fields.8,
+            changes: fields.9,
+        }
     } else {
-        build_lark_card(&CardEvent::IssueUpdated {
-            issue: &issue,
-            url: &url,
-            changes,
-        })
+        Event::IssueUpdated {
+            source: fields.0,
+            identifier: fields.1,
+            title: fields.2,
+            description: fields.3,
+            status: fields.4,
+            priority: fields.5,
+            assignee: fields.6,
+            assignee_email: fields.7,
+            url: fields.8,
+            changes: fields.9,
+        }
+    }
+}
+
+async fn send_debounced_notification(state: &AppState, pending: PendingUpdate) {
+    let kind = if pending.event.is_issue_created() {
+        "create"
+    } else {
+        "update"
+    };
+    let changes = pending.event.changes();
+    let changes_str = if changes.is_empty() {
+        "none".to_string()
+    } else {
+        changes.join(", ")
     };
 
-    send_lark_card(state, &card_msg).await;
+    info!("sending debounced {kind} – changes: {changes_str}");
 
-    if let Some(ref email) = dm_email {
-        super::try_dm_assignee(state, &issue, &url, email).await;
-    }
+    dispatch::dispatch(&pending.event, state, pending.dm_email.as_deref()).await;
 }

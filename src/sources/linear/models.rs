@@ -1,9 +1,8 @@
-use serde::{Deserialize, Serialize};
+//! Deserialization types for Linear webhook payloads and GraphQL responses.
 
-// ---------------------------------------------------------------------------
-// Linear webhook models
-// ---------------------------------------------------------------------------
+use serde::Deserialize;
 
+/// Top-level Linear webhook payload.
 #[derive(Debug, Deserialize)]
 pub struct LinearPayload {
     pub action: String,
@@ -15,6 +14,7 @@ pub struct LinearPayload {
     pub updated_from: Option<serde_json::Value>,
 }
 
+/// Issue data embedded in a webhook payload.
 #[derive(Debug, Deserialize)]
 pub struct Issue {
     #[allow(dead_code)]
@@ -38,6 +38,7 @@ pub struct Assignee {
     pub email: Option<String>,
 }
 
+/// Previous field values sent in an `"update"` webhook for change detection.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatedFrom {
@@ -51,6 +52,7 @@ pub struct UpdatedFrom {
     pub assignee_id: Option<String>,
 }
 
+/// Comment data embedded in a webhook payload.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommentData {
@@ -66,6 +68,7 @@ pub struct CommentIssue {
     pub title: String,
 }
 
+/// Actor (user) attached to a webhook event.
 #[derive(Debug, Deserialize)]
 pub struct Actor {
     pub name: String,
@@ -73,37 +76,7 @@ pub struct Actor {
     pub email: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Lark card models
-// ---------------------------------------------------------------------------
-
-#[derive(Serialize)]
-pub struct LarkMessage {
-    pub msg_type: &'static str,
-    pub card: LarkCard,
-}
-
-#[derive(Serialize, Clone)]
-pub struct LarkCard {
-    pub header: LarkHeader,
-    pub elements: Vec<serde_json::Value>,
-}
-
-#[derive(Serialize, Clone)]
-pub struct LarkHeader {
-    pub template: String,
-    pub title: LarkTitle,
-}
-
-#[derive(Serialize, Clone)]
-pub struct LarkTitle {
-    pub content: String,
-    pub tag: &'static str,
-}
-
-// ---------------------------------------------------------------------------
-// Linear GraphQL Client Models
-// ---------------------------------------------------------------------------
+/// Issue data returned by the Linear GraphQL API.
 #[derive(Debug, Deserialize)]
 pub struct LinearIssueData {
     pub title: String,

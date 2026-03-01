@@ -1,7 +1,8 @@
 use reqwest::Client;
 
-use crate::{debounce::DebounceMap, lark::LarkBotClient, linear::LinearClient};
+use crate::{debounce::DebounceMap, sinks::lark::LarkBotClient, sources::linear::client::LinearClient};
 
+/// Shared application state, wrapped in `Arc` and passed to every handler.
 pub struct AppState {
     pub webhook_secret: String,
     pub lark_webhook_url: String,

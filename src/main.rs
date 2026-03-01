@@ -1,9 +1,9 @@
 mod config;
 mod debounce;
-mod handlers;
-mod lark;
-mod linear;
-mod models;
+mod dispatch;
+mod event;
+mod sinks;
+mod sources;
 mod utils;
 
 use std::{env, sync::Arc};
@@ -17,9 +17,12 @@ use tracing::{info, warn};
 
 use config::AppState;
 use debounce::DebounceMap;
-use handlers::{health, lark_event_handler, webhook_handler};
-use lark::LarkBotClient;
-use linear::LinearClient;
+use sinks::lark::LarkBotClient;
+use sources::linear::client::LinearClient;
+
+async fn health() -> &'static str {
+    "ok"
+}
 
 #[tokio::main]
 async fn main() {
@@ -76,8 +79,8 @@ async fn main() {
     });
 
     let app = Router::new()
-        .route("/webhook", post(webhook_handler))
-        .route("/lark/event", post(lark_event_handler))
+        .route("/webhook", post(sources::linear::webhook_handler))
+        .route("/lark/event", post(sinks::lark::lark_event_handler))
         .route("/health", get(health))
         .with_state(state);
 
