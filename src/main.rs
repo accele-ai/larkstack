@@ -58,6 +58,12 @@ async fn main() {
         info!("LARK_VERIFICATION_TOKEN set – event verification enabled");
     }
 
+    let debounce_delay_ms: u64 = env::var("DEBOUNCE_DELAY_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5000);
+    info!("debounce delay: {debounce_delay_ms}ms");
+
     let state = Arc::new(AppState {
         webhook_secret,
         lark_webhook_url,
@@ -66,6 +72,7 @@ async fn main() {
         linear_client,
         lark_verification_token,
         update_debounce: DebounceMap::new(),
+        debounce_delay_ms,
     });
 
     let app = Router::new()

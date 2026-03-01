@@ -10,4 +10,5 @@ pub struct AppState {
     pub linear_client: Option<LinearClient>,
     pub lark_verification_token: Option<String>,
     pub update_debounce: DebounceMap,
+    pub debounce_delay_ms: u64,
 }

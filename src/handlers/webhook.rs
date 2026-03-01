@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     config::AppState,
-    debounce::{PendingUpdate, DEBOUNCE_MS},
+    debounce::PendingUpdate,
     lark::{build_lark_card, CardEvent},
     models::{Actor, CommentData, Issue, LinearPayload, UpdatedFrom},
     utils::{build_change_fields, verify_signature},
@@ -63,23 +63,40 @@ pub async fn webhook_handler(
                 }
             };
             info!(
-                "processing Issue create – {} {}",
+                "queuing debounced Issue create – {} {}",
                 issue.identifier, issue.title
             );
 
-            let card_msg = build_lark_card(&CardEvent::IssueCreated {
-                issue: &issue,
-                url: &payload.url,
+            let dm_email = issue.assignee.as_ref().and_then(|a| a.email.clone());
+
+            let issue_id = issue.id.clone();
+
+            let cancel_rx = state
+                .update_debounce
+                .upsert(
+                    issue_id.clone(),
+                    issue,
+                    payload.url.clone(),
+                    vec![],
+                    dm_email,
+                    true,
+                )
+                .await;
+
+            let state2 = Arc::clone(&state);
+            let delay = state.debounce_delay_ms;
+            tokio::spawn(async move {
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {
+                        if let Some(p) = state2.update_debounce.take(&issue_id).await {
+                            send_debounced_notification(&state2, p).await;
+                        }
+                    }
+                    _ = cancel_rx => {}
+                }
             });
 
-            // Phase 2: DM assignee on create if assignee is set
-            if let Some(ref assignee) = issue.assignee {
-                if let Some(ref email) = assignee.email {
-                    super::try_dm_assignee(&state, &issue, &payload.url, email).await;
-                }
-            }
-
-            card_msg
+            return StatusCode::OK;
         }
         ("Issue", "update") => {
             let issue: Issue = match serde_json::from_value(payload.data.clone()) {
@@ -118,7 +135,6 @@ pub async fn webhook_handler(
 
             let issue_id = issue.id.clone();
 
-            // Merge with any pending update for this issue and (re)start the timer.
             let cancel_rx = state
                 .update_debounce
                 .upsert(
@@ -127,21 +143,20 @@ pub async fn webhook_handler(
                     payload.url.clone(),
                     changes,
                     dm_email,
+                    false,
                 )
                 .await;
 
-            // Spawn the timer task; whichever fires first wins.
             let state2 = Arc::clone(&state);
+            let delay = state.debounce_delay_ms;
             tokio::spawn(async move {
                 tokio::select! {
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(DEBOUNCE_MS)) => {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {
                         if let Some(p) = state2.update_debounce.take(&issue_id).await {
-                            send_update_notification(&state2, p).await;
+                            send_debounced_notification(&state2, p).await;
                         }
                     }
-                    _ = cancel_rx => {
-                        // A newer update cancelled this task; the replacement task will fire.
-                    }
+                    _ = cancel_rx => {}
                 }
             });
 
@@ -190,11 +205,12 @@ pub async fn webhook_handler(
 }
 
 // ---------------------------------------------------------------------------
-// Debounced update sender
+// Debounced notification sender (handles both create and update)
 // ---------------------------------------------------------------------------
 
-async fn send_update_notification(state: &AppState, pending: PendingUpdate) {
+async fn send_debounced_notification(state: &AppState, pending: PendingUpdate) {
     let PendingUpdate {
+        is_create,
         issue,
         url,
         changes,
@@ -202,8 +218,9 @@ async fn send_update_notification(state: &AppState, pending: PendingUpdate) {
         ..
     } = pending;
 
+    let kind = if is_create { "create" } else { "update" };
     info!(
-        "sending debounced update for {} – changes: {}",
+        "sending debounced {kind} for {} – changes: {}",
         issue.identifier,
         if changes.is_empty() {
             "none".to_string()
@@ -212,11 +229,19 @@ async fn send_update_notification(state: &AppState, pending: PendingUpdate) {
         }
     );
 
-    let card_msg = build_lark_card(&CardEvent::IssueUpdated {
-        issue: &issue,
-        url: &url,
-        changes,
-    });
+    let card_msg = if is_create {
+        build_lark_card(&CardEvent::IssueCreated {
+            issue: &issue,
+            url: &url,
+            changes,
+        })
+    } else {
+        build_lark_card(&CardEvent::IssueUpdated {
+            issue: &issue,
+            url: &url,
+            changes,
+        })
+    };
 
     send_lark_card(state, &card_msg).await;
 
