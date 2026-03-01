@@ -1,48 +1,47 @@
 name: Rust CI
 
-# Trigger: run on push to main or on pull requests targeting main
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
+    paths: ["**.rs", "Cargo.toml", "Cargo.lock", ".github/workflows/ci.yml"]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
+    paths: ["**.rs", "Cargo.toml", "Cargo.lock", ".github/workflows/ci.yml"]
 
-# Force colored output in cargo logs for easier reading
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build_and_test:
-    name: Build and Test
+  fmt:
+    name: Format
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Check out the repository
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # 2. Install the stable Rust toolchain with fmt and clippy components
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: rustfmt
+      - run: cargo fmt --all -- --check
 
-      # 3. Cache compiled dependencies to speed up CI (avoids recompiling tokio, reqwest, etc.)
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
 
-      # 4. Verify the project compiles successfully
-      - name: Check compilation
-        run: cargo check
-
-      # 5. Enforce code formatting (mirrors local pre-commit rules)
-      - name: Check format
-        run: cargo fmt --all -- --check
-
-      # 6. Run Clippy lints — warnings are treated as errors
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      # 7. Run all unit and integration tests
-      - name: Run tests
-        run: cargo test
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
