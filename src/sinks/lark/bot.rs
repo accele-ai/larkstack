@@ -1,14 +1,13 @@
+//! Lark Bot API client for sending direct messages via tenant access token.
+
 use reqwest::Client;
 use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::info;
 
-use crate::models::LarkCard;
+use super::models::LarkCard;
 
-// ---------------------------------------------------------------------------
-// Phase 2: Lark Bot API client (DM via app)
-// ---------------------------------------------------------------------------
-
+/// Authenticated Lark bot that can send interactive-card DMs.
 pub struct LarkBotClient {
     app_id: String,
     app_secret: String,
@@ -34,10 +33,10 @@ impl LarkBotClient {
         }
     }
 
+    /// Returns a valid tenant access token, refreshing it when necessary.
     async fn get_token(&self) -> Result<String, String> {
         let mut cached = self.token.lock().await;
 
-        // Refresh 5 minutes before expiry
         if !cached.value.is_empty()
             && cached.expires_at > std::time::Instant::now() + std::time::Duration::from_secs(300)
         {
@@ -80,6 +79,7 @@ impl LarkBotClient {
         Ok(token)
     }
 
+    /// Sends an interactive card to a user identified by `email`.
     pub async fn send_dm(&self, email: &str, card: &LarkCard) -> Result<(), String> {
         let token = self.get_token().await?;
 

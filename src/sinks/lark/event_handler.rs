@@ -1,3 +1,6 @@
+//! Axum handler for `POST /lark/event` — Lark platform callbacks including
+//! challenge verification and URL link preview (unfurl).
+
 use std::sync::Arc;
 
 use axum::{body::Bytes, extract::State, http::StatusCode, Json};
@@ -5,13 +8,14 @@ use tracing::{error, info, warn};
 
 use crate::{
     config::AppState,
-    linear::{build_preview_card, extract_identifier_from_url},
+    sources::linear::client::extract_identifier_from_url,
 };
 
-// ---------------------------------------------------------------------------
-// Phase 3: Lark event handler (link preview / unfurl)
-// ---------------------------------------------------------------------------
+use super::cards::build_preview_card;
 
+/// Handles incoming Lark event callbacks.
+///
+/// Supports `url_verification` challenges and `url.preview.get` link previews.
 pub async fn lark_event_handler(
     State(state): State<Arc<AppState>>,
     body: Bytes,
@@ -27,7 +31,6 @@ pub async fn lark_event_handler(
         }
     };
 
-    // Challenge verification
     if body_value.get("type").and_then(|v| v.as_str()) == Some("url_verification") {
         let challenge = body_value
             .get("challenge")
@@ -40,7 +43,6 @@ pub async fn lark_event_handler(
         );
     }
 
-    // Verify token if configured
     if let Some(ref expected_token) = state.lark_verification_token {
         let token = body_value
             .get("header")
@@ -56,10 +58,8 @@ pub async fn lark_event_handler(
         }
     }
 
-    // Log full event body so we can inspect event_type and structure
     info!("lark event received: {body_value}");
 
-    // Handle URL preview event
     let event_type = body_value
         .get("header")
         .and_then(|h| h.get("event_type"))
@@ -74,6 +74,7 @@ pub async fn lark_event_handler(
     (StatusCode::OK, Json(serde_json::json!({})))
 }
 
+/// Fetches a Linear issue and returns an inline preview card.
 async fn handle_link_preview(
     state: &AppState,
     body: &serde_json::Value,
@@ -83,13 +84,11 @@ async fn handle_link_preview(
         return (StatusCode::OK, Json(serde_json::json!({})));
     };
 
-    // Extract the URL from the event
     let url = body
         .get("event")
         .and_then(|e| e.get("url"))
         .and_then(|v| v.as_str())
         .or_else(|| {
-            // Some Lark event formats nest it differently
             body.get("event")
                 .and_then(|e| e.get("body"))
                 .and_then(|b| b.get("url"))
