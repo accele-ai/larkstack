@@ -1,6 +1,6 @@
 //! Converts [`Event`]s and [`LinearIssueData`] into Lark interactive cards.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
     event::{Event, Priority},
@@ -166,7 +166,11 @@ fn build_issue_card(
         }));
     }
 
-    elements.push(build_fields(status, &priority.display(), Some(assignee_name)));
+    elements.push(build_fields(
+        status,
+        &priority.display(),
+        Some(assignee_name),
+    ));
     elements.push(build_action_button(url));
 
     LarkMessage {

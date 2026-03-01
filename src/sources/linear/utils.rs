@@ -19,10 +19,7 @@ pub fn verify_signature(secret: &str, body: &[u8], signature: &str) -> bool {
 
 /// Compares the current [`Issue`] state against `updated_from` and returns
 /// human-readable change descriptions (e.g. `"**Status:** Todo → In Progress"`).
-pub fn build_change_fields(
-    issue: &Issue,
-    updated_from: &Option<serde_json::Value>,
-) -> Vec<String> {
+pub fn build_change_fields(issue: &Issue, updated_from: &Option<serde_json::Value>) -> Vec<String> {
     let mut changes = Vec::new();
 
     let Some(uf_value) = updated_from else {

@@ -6,19 +6,17 @@ mod sinks;
 mod sources;
 mod utils;
 
-use std::{env, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
-    routing::{get, post},
     Router,
+    routing::{get, post},
 };
 use reqwest::Client;
-use tracing::{info, warn};
+use tracing::info;
 
-use config::AppState;
+use config::{AppState, LarkConfig, LinearConfig, ServerConfig};
 use debounce::DebounceMap;
-use sinks::lark::LarkBotClient;
-use sources::linear::client::LinearClient;
 
 async fn health() -> &'static str {
     "ok"
@@ -32,50 +30,30 @@ async fn main() {
         )
         .init();
 
-    let webhook_secret =
-        env::var("LINEAR_WEBHOOK_SECRET").expect("LINEAR_WEBHOOK_SECRET must be set");
-    let lark_webhook_url = env::var("LARK_WEBHOOK_URL").unwrap_or_else(|_| {
-        warn!("LARK_WEBHOOK_URL not set – lark notifications will fail");
-        String::new()
-    });
-    let port = env::var("PORT").unwrap_or_else(|_| "3000".into());
+    let linear = LinearConfig::from_env().expect("invalid linear config");
+    let lark = LarkConfig::from_env().expect("invalid lark config");
+    let server = ServerConfig::from_env().expect("invalid server config");
 
-    let lark_bot = match (env::var("LARK_APP_ID"), env::var("LARK_APP_SECRET")) {
-        (Ok(app_id), Ok(app_secret)) => {
-            info!("lark bot configured – DM notifications enabled");
-            Some(LarkBotClient::new(app_id, app_secret, Client::new()))
-        }
-        _ => {
-            info!("LARK_APP_ID/LARK_APP_SECRET not set – DM notifications disabled");
-            None
-        }
-    };
+    let http = Client::new();
+    let lark_bot = lark.bot_client(&http);
+    let linear_client = linear.graphql_client(&http);
 
-    let linear_client = env::var("LINEAR_API_KEY").ok().map(|api_key| {
-        info!("LINEAR_API_KEY set – link preview enabled");
-        LinearClient::new(api_key, Client::new())
-    });
-
-    let lark_verification_token = env::var("LARK_VERIFICATION_TOKEN").ok();
-    if lark_verification_token.is_some() {
+    if lark.verification_token.is_some() {
         info!("LARK_VERIFICATION_TOKEN set – event verification enabled");
     }
 
-    let debounce_delay_ms: u64 = env::var("DEBOUNCE_DELAY_MS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(5000);
-    info!("debounce delay: {debounce_delay_ms}ms");
+    info!("debounce delay: {}ms", server.debounce_delay_ms);
+
+    let addr = format!("0.0.0.0:{}", server.port);
 
     let state = Arc::new(AppState {
-        webhook_secret,
-        lark_webhook_url,
-        http: Client::new(),
+        linear,
+        lark,
+        server,
+        http,
         lark_bot,
         linear_client,
-        lark_verification_token,
         update_debounce: DebounceMap::new(),
-        debounce_delay_ms,
     });
 
     let app = Router::new()
@@ -84,7 +62,6 @@ async fn main() {
         .route("/health", get(health))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{port}");
     info!("listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr)

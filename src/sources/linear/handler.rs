@@ -44,7 +44,7 @@ pub async fn webhook_handler(
         }
     };
 
-    if !verify_signature(&state.webhook_secret, &body, signature) {
+    if !verify_signature(&state.linear.webhook_secret, &body, signature) {
         warn!("invalid webhook signature");
         return StatusCode::UNAUTHORIZED;
     }
@@ -82,7 +82,7 @@ pub async fn webhook_handler(
                 .await;
 
             let state2 = Arc::clone(&state);
-            let delay = state.debounce_delay_ms;
+            let delay = state.server.debounce_delay_ms;
             tokio::spawn(async move {
                 tokio::select! {
                     _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {
@@ -140,7 +140,7 @@ pub async fn webhook_handler(
                 .await;
 
             let state2 = Arc::clone(&state);
-            let delay = state.debounce_delay_ms;
+            let delay = state.server.debounce_delay_ms;
             tokio::spawn(async move {
                 tokio::select! {
                     _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {
@@ -178,9 +178,7 @@ pub async fn webhook_handler(
                 .as_ref()
                 .map(|i| i.title.clone())
                 .unwrap_or_default();
-            let author = actor
-                .map(|a| a.name)
-                .unwrap_or_else(|| "Someone".into());
+            let author = actor.map(|a| a.name).unwrap_or_else(|| "Someone".into());
 
             info!("processing Comment create on {identifier}");
 

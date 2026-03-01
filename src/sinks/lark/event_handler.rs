@@ -3,13 +3,10 @@
 
 use std::sync::Arc;
 
-use axum::{body::Bytes, extract::State, http::StatusCode, Json};
+use axum::{Json, body::Bytes, extract::State, http::StatusCode};
 use tracing::{error, info, warn};
 
-use crate::{
-    config::AppState,
-    sources::linear::client::extract_identifier_from_url,
-};
+use crate::{config::AppState, sources::linear::client::extract_identifier_from_url};
 
 use super::cards::build_preview_card;
 
@@ -43,7 +40,7 @@ pub async fn lark_event_handler(
         );
     }
 
-    if let Some(ref expected_token) = state.lark_verification_token {
+    if let Some(ref expected_token) = state.lark.verification_token {
         let token = body_value
             .get("header")
             .and_then(|h| h.get("token"))

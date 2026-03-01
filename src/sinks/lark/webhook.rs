@@ -10,7 +10,7 @@ use super::models::LarkMessage;
 pub async fn send_lark_card(state: &AppState, card: &LarkMessage) {
     match state
         .http
-        .post(&state.lark_webhook_url)
+        .post(&state.lark.webhook_url)
         .json(card)
         .send()
         .await

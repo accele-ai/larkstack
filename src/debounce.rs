@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 
 use crate::event::Event;
 
