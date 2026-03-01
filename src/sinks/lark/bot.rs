@@ -5,6 +5,11 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::info;
 
+#[cfg(not(feature = "cf-worker"))]
+use std::time::Instant;
+#[cfg(feature = "cf-worker")]
+use web_time::Instant;
+
 use super::models::LarkCard;
 
 /// Authenticated Lark bot that can send interactive-card DMs.
@@ -17,7 +22,7 @@ pub struct LarkBotClient {
 
 struct CachedToken {
     value: String,
-    expires_at: std::time::Instant,
+    expires_at: Instant,
 }
 
 impl LarkBotClient {
@@ -27,7 +32,7 @@ impl LarkBotClient {
             app_secret,
             token: Mutex::new(CachedToken {
                 value: String::new(),
-                expires_at: std::time::Instant::now(),
+                expires_at: Instant::now(),
             }),
             http,
         }
@@ -38,7 +43,7 @@ impl LarkBotClient {
         let mut cached = self.token.lock().await;
 
         if !cached.value.is_empty()
-            && cached.expires_at > std::time::Instant::now() + std::time::Duration::from_secs(300)
+            && cached.expires_at > Instant::now() + std::time::Duration::from_secs(300)
         {
             return Ok(cached.value.clone());
         }
@@ -73,7 +78,7 @@ impl LarkBotClient {
         let expire = body.get("expire").and_then(|v| v.as_u64()).unwrap_or(7200);
 
         cached.value = token.clone();
-        cached.expires_at = std::time::Instant::now() + std::time::Duration::from_secs(expire);
+        cached.expires_at = Instant::now() + std::time::Duration::from_secs(expire);
 
         info!("refreshed lark bot tenant access token (expires in {expire}s)");
         Ok(token)

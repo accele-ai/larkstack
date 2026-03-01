@@ -19,6 +19,12 @@ pub struct PendingUpdate {
 /// Thread-safe map of entity keys to their pending debounced updates.
 pub struct DebounceMap(Mutex<HashMap<String, PendingUpdate>>);
 
+impl Default for DebounceMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DebounceMap {
     pub fn new() -> Self {
         Self(Mutex::new(HashMap::new()))

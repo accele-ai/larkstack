@@ -3,7 +3,10 @@
 //! Every source converts its platform-specific payload into an [`Event`],
 //! which sinks consume without knowing the origin.
 
+use serde::{Deserialize, Serialize};
+
 /// Issue priority level, normalized across all sources.
+#[derive(Serialize, Deserialize)]
 pub enum Priority {
     None,
     Urgent,
@@ -53,6 +56,7 @@ impl Priority {
 }
 
 /// A normalized event produced by a source and consumed by sinks.
+#[derive(Serialize, Deserialize)]
 pub enum Event {
     IssueCreated {
         #[allow(dead_code)]

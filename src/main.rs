@@ -1,11 +1,3 @@
-mod config;
-mod debounce;
-mod dispatch;
-mod event;
-mod sinks;
-mod sources;
-mod utils;
-
 use std::sync::Arc;
 
 use axum::{
@@ -14,7 +6,7 @@ use axum::{
 };
 use tracing::info;
 
-use config::AppState;
+use larkstack::config::AppState;
 
 async fn health() -> &'static str {
     "ok"
@@ -32,8 +24,14 @@ async fn main() {
     let addr = format!("0.0.0.0:{}", state.server.port);
 
     let app = Router::new()
-        .route("/webhook", post(sources::linear::webhook_handler))
-        .route("/lark/event", post(sinks::lark::lark_event_handler))
+        .route(
+            "/webhook",
+            post(larkstack::sources::linear::webhook_handler),
+        )
+        .route(
+            "/lark/event",
+            post(larkstack::sinks::lark::lark_event_handler),
+        )
         .route("/health", get(health))
         .with_state(state);
 

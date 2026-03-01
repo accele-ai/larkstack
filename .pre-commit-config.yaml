@@ -12,7 +12,7 @@ repos:
       - id: cargo-clippy
         name: cargo clippy
         description: Run Linter to check code style and potential issues
-        entry: cargo clippy --all-targets --all-features -- -D warnings
+        entry: cargo clippy --all-targets -- -D warnings
         language: system
         types: [rust]
         pass_filenames: false
