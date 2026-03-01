@@ -4,12 +4,12 @@
 
 <br>
 
-<h1 align="center">LarkStack-Linear </h1>
+<h1 align="center">LarkStack-Linear</h1>
 
 <p align="center">
-  A high-performance, type-safe middleware written in <strong>Rust</strong> that integrates <a href="https://linear.app/">Linear</a> with <a href="https://larksuite.com/">Lark / Feishu</a>.
+  A Rust middleware that syncs <a href="https://linear.app/">Linear</a> events to <a href="https://larksuite.com/">Lark / Feishu</a> notifications.
   <br>
-  Built with Axum 0.8 & Tokio for zero-delay workspace integration.
+  Axum 0.8, Tokio, async all the way down.
 </p>
 
 <p align="center">
@@ -21,66 +21,64 @@
 
 <hr>
 
-## ✨ Features
+## Features
 
-- 📢 **Group Notifications (Phase 1)**: Automatically pushes Interactive Cards to a designated Lark group when Linear Issues are created or updated. Cards are color-coded based on priority. Includes a **500ms DebounceMap** window to coalesce rapid-fire updates and prevent notification spam.
+- **Group notifications** — When a Linear issue is created or updated, an interactive card (color-coded by priority) is posted to a Lark group chat. A 500 ms debounce window coalesces rapid-fire updates so you don't get spammed.
 
+- **DM on assign** — Assigning an issue sends a private message to the assignee's Lark account, matched by email. No manual ID mapping needed.
+- **Link previews** — Paste a `linear.app` URL in Lark and it unfurls into a summary card. Handles the `url_verification` challenge and fetches issue details via Linear's GraphQL API.
+- **Webhook signature verification** — All Linear webhooks are validated with HMAC-SHA256. Lark event callbacks are verified too.
 
-- 👤 **Direct Message on Assign (Phase 2)**: Automatically sends a private DM to a team member when an issue is assigned to them. Matches the assignee's Linear email with their Lark account email natively—no manual ID mapping required!
-- 🔗 **Rich Link Previews (Phase 3)**: When a user pastes a `linear.app` link in Lark, the bridge handles Lark's `url_verification` challenge, fetches issue details via Linear's GraphQL API, and unfurls the link into a detailed summary card.
-- 🛡️ **Secure by Default**: Implements strict HMAC-SHA256 signature verification for Linear webhooks and natively handles Lark's Event callbacks.
+## Architecture
 
-## 🏗️ Architecture & Tech Stack
+- `axum 0.8` + `tokio` + `reqwest 0.12`
+- `POST /webhook` handles Linear events; `POST /lark/event` handles Lark callbacks. The two paths are fully separated.
+- Lark logic is split into `cards.rs` (card builders, pure functions) and `bot.rs` (tenant token cache + HTTP client).
 
-Following a robust refactoring, the codebase is highly modularized:
-- **Framework**: `axum 0.8` + `tokio` (Async runtime) + `reqwest 0.12`.
-- **Handlers**: Clean separation between `POST /webhook` (Linear) and `POST /lark/event` (Lark callbacks).
-- **Lark Module**: Decoupled `cards.rs` (pure UI builders) and `bot.rs` (tenant token caching & HTTP client).
-
-### API Endpoints
+### Endpoints
 | Method | Path | Purpose |
 | :--- | :--- | :--- |
 | `POST` | `/webhook` | Linear webhook receiver |
 | `POST` | `/lark/event` | Lark event callback (challenge + link preview) |
 | `GET`  | `/health` | Health check (returns `"ok"`) |
 
-## ⚙️ Configuration
+## Configuration
 
-Ensure the following environment variables are set. 
+Set these environment variables before running:
 
 <p align="center">
   <img src="./docs/images/linear-api-config.jpeg" width="600" alt="Linear API Configuration">
   <br>
-  <sup><i>Configure your Webhook and API Keys in the Linear Workspace Settings.</i></sup>
+  <sup><i>Webhook and API key settings in Linear's workspace settings.</i></sup>
 </p>
 
 | Variable | Required | Description |
 | :--- | :---: | :--- |
-| `LINEAR_WEBHOOK_SECRET` | ✅ | Used for HMAC signature verification. |
-| `LINEAR_API_KEY` | For Phase 3 | GraphQL API access for link previews. |
-| `LARK_WEBHOOK_URL` | ✅ | Group notification target. |
-| `LARK_APP_ID` | For Phase 2 | Bot app ID for tenant token. |
-| `LARK_APP_SECRET` | For Phase 2 | Bot app secret. |
-| `LARK_VERIFICATION_TOKEN`| For Phase 3 | Lark event callback verification. |
-| `PORT` | ❌ | Defaults to `3000`. |
+| `LINEAR_WEBHOOK_SECRET` | ✅ | HMAC signature verification |
+| `LINEAR_API_KEY` | Phase 3 | GraphQL API access for link previews |
+| `LARK_WEBHOOK_URL` | ✅ | Group chat webhook URL |
+| `LARK_APP_ID` | Phase 2 | Bot app ID (for tenant token) |
+| `LARK_APP_SECRET` | Phase 2 | Bot app secret |
+| `LARK_VERIFICATION_TOKEN`| Phase 3 | Lark event callback verification |
+| `PORT` | ❌ | Defaults to `3000` |
 
-## 🚀 Deployment (Railway)
+## Deployment (Railway)
 
-Optimized for [Railway](https://railway.app/) using a highly efficient multi-stage `Dockerfile` to keep the image size minimal and deployment times fast.
+The repo includes a multi-stage `Dockerfile` sized for [Railway](https://railway.app/).
 
 <p align="center">
   <img src="./docs/images/railway-vars.png" width="600" alt="Railway Variables Configuration">
   <br>
-  <sup><i>Zero-config deployment: Just paste your environment variables into Railway.</i></sup>
+  <sup><i>Paste your environment variables into Railway and deploy.</i></sup>
 </p>
 
-## 💻 Local Development & Testing
+## Local development
 
-1. **Create a Test Environment**: Set up a private Lark group with a new Custom Bot and create a "Local Debug" webhook in Linear.
-2. **Start a Local Tunnel**: Expose your local server using `ngrok http 3000`.
-3. **Run the Server**: Use `cargo run` and point your Linear webhook to `https://<YOUR_NGROK_URL>/webhook`.
-4. **Code Quality**: This project uses `prek` (local `fmt`/`clippy` gatekeeper) and strict GitHub Actions (`cargo clippy -- -D warnings`) to enforce code standards.
+1. Create a private Lark group with a custom bot. Add a "Local Debug" webhook in Linear.
+2. Run `ngrok http 3000` to get a public URL.
+3. `cargo run`, then point the Linear webhook to `https://<YOUR_NGROK_URL>/webhook`.
+4. Code quality is enforced by `prek` locally and `cargo clippy -- -D warnings` in CI.
 
-## 📝 License
+## License
 
 [MIT License](./LICENSE)
