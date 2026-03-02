@@ -42,14 +42,14 @@ export LARK_WEBHOOK_URL=https://open.larksuite.com/open-apis/bot/v2/hook/xxx
 cargo run
 ```
 
-完整环境变量说明见 [Configuration](./docs/configuration.md)。
+完整环境变量说明见 [Configuration](./docs/getting-started/configuration.md)。
 
 ## 部署
 
 | 平台 | 文档 |
 | :--- | :--- |
-| Railway / Docker | [docs/deploy-railway.md](./docs/deploy-railway.md) |
-| Cloudflare Workers | [docs/deploy-cloudflare-workers.md](./docs/deploy-cloudflare-workers.md) |
+| Railway / Docker | [docs/deploy/railway.md](./docs/deploy/railway.md) |
+| Cloudflare Workers | [docs/deploy/cloudflare-workers.md](./docs/deploy/cloudflare-workers.md) |
 
 ## 本地开发
 

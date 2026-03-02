@@ -1,0 +1,47 @@
+[project]
+site_name = "LarkStack"
+site_description = "Sync Linear events to Lark / Feishu notifications"
+site_url = "https://github.com/accele-ai/larkstack"
+repo_url = "https://github.com/accele-ai/larkstack"
+repo_name = "accele-ai/larkstack"
+docs_dir = "docs"
+site_dir = "site"
+
+[project.theme]
+language = "en"
+logo = "images/logo.png"
+features = [
+    "content.code.copy",
+    "navigation.instant",
+    "navigation.sections",
+    "navigation.footer",
+    "search.highlight",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[[project.nav]]
+"Home" = "index.md"
+
+[[project.nav]]
+"Getting started" = [
+    { "Quick start" = "getting-started/quickstart.md" },
+    { "Configuration" = "getting-started/configuration.md" },
+]
+
+[[project.nav]]
+"Architecture" = "architecture.md"
+
+[[project.nav]]
+"Deployment" = [
+    { "Railway / Docker" = "deploy/railway.md" },
+    { "Cloudflare Workers" = "deploy/cloudflare-workers.md" },
+]

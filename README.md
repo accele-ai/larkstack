@@ -42,14 +42,14 @@ export LARK_WEBHOOK_URL=https://open.larksuite.com/open-apis/bot/v2/hook/xxx
 cargo run
 ```
 
-See [Configuration](./docs/configuration.md) for the full environment variable reference.
+See [Configuration](./docs/getting-started/configuration.md) for the full environment variable reference.
 
 ## Deployment
 
 | Platform | Guide |
 | :--- | :--- |
-| Railway / Docker | [docs/deploy-railway.md](./docs/deploy-railway.md) |
-| Cloudflare Workers | [docs/deploy-cloudflare-workers.md](./docs/deploy-cloudflare-workers.md) |
+| Railway / Docker | [docs/deploy/railway.md](./docs/deploy/railway.md) |
+| Cloudflare Workers | [docs/deploy/cloudflare-workers.md](./docs/deploy/cloudflare-workers.md) |
 
 ## Local Development
 
