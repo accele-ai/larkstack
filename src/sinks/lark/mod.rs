@@ -4,26 +4,45 @@ mod bot;
 pub mod cards;
 pub mod event_handler;
 pub mod models;
-mod webhook;
+pub(crate) mod webhook;
 
 pub use bot::LarkBotClient;
 pub use event_handler::lark_event_handler;
 
-use reqwest::Client;
 use tracing::error;
 
-use crate::event::Event;
+use crate::{config::AppState, event::Event};
 
-/// Sends a card notification for `event` to the given Lark group webhook.
-pub async fn notify(event: &Event, http: &Client, webhook_url: &str) {
+/// Sends a card notification for `event` to the Lark group.
+///
+/// Prefers Bot API (`target_chat_id`) when available, falls back to the
+/// simple webhook (`webhook_url`).
+pub async fn notify(event: &Event, state: &AppState) {
     let card = cards::build_lark_card(event);
-    webhook::send_lark_card(http, webhook_url, &card).await;
+
+    match (&state.lark_bot, &state.lark.target_chat_id) {
+        (Some(bot), Some(chat_id)) => {
+            if let Err(e) = bot.send_to_chat(chat_id, &card.card).await {
+                error!("failed to send card to chat {chat_id}: {e}");
+            }
+        }
+        _ if !state.lark.webhook_url.is_empty() => {
+            webhook::send_lark_card(&state.http, &state.lark.webhook_url, &card).await;
+        }
+        _ => {
+            error!(
+                "no Lark delivery method configured (need LARK_TARGET_CHAT_ID + bot, or LARK_WEBHOOK_URL)"
+            );
+        }
+    }
 }
 
-/// DMs the assignee about `event` (no-op when `bot` is `None`).
+/// DMs the assignee about `event` (no-op when `bot` is `None` or event
+/// does not support DM notifications).
 pub async fn try_dm(event: &Event, bot: &LarkBotClient, email: &str) {
-    let card = cards::build_assign_dm_card(event);
-    if let Err(e) = bot.send_dm(email, &card).await {
-        error!("failed to DM assignee {email}: {e}");
+    if let Some(card) = cards::build_assign_dm_card(event)
+        && let Err(e) = bot.send_dm(email, &card).await
+    {
+        error!("failed to DM {email}: {e}");
     }
 }

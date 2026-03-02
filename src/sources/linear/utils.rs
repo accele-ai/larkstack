@@ -1,20 +1,12 @@
 //! Linear-specific helpers: signature verification and change detection.
 
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
-
 use crate::event::Priority;
 
 use super::models::{Issue, UpdatedFrom};
 
 /// Verifies the `linear-signature` header using HMAC-SHA256.
 pub fn verify_signature(secret: &str, body: &[u8], signature: &str) -> bool {
-    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret.as_bytes()) else {
-        return false;
-    };
-    mac.update(body);
-    let expected = hex::encode(mac.finalize().into_bytes());
-    expected == signature
+    crate::utils::verify_hmac_sha256(secret, body, signature)
 }
 
 /// Compares the current [`Issue`] state against `updated_from` and returns

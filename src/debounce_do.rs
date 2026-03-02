@@ -84,26 +84,51 @@ impl DurableObject for DebounceObject {
         storage.delete_all().await?;
 
         let http = reqwest::Client::new();
-        let webhook_url = self
+
+        // Build the card once, then deliver via Bot API or webhook fallback.
+        let card = crate::sinks::lark::cards::build_lark_card(&event);
+
+        let app_id = self.env.var("LARK_APP_ID").ok().map(|v| v.to_string());
+        let app_secret = self
             .env
-            .var("LARK_WEBHOOK_URL")
-            .map(|v| v.to_string())
-            .unwrap_or_default();
+            .secret("LARK_APP_SECRET")
+            .ok()
+            .map(|s| s.to_string());
+        let target_chat_id = self
+            .env
+            .var("LARK_TARGET_CHAT_ID")
+            .ok()
+            .map(|v| v.to_string());
 
-        crate::sinks::lark::notify(&event, &http, &webhook_url).await;
+        let bot = match (app_id, app_secret) {
+            (Some(id), Some(secret)) => Some(crate::sinks::lark::LarkBotClient::new(
+                id,
+                secret,
+                http.clone(),
+            )),
+            _ => None,
+        };
 
-        if let Some(ref email) = dm_email {
-            let app_id = self.env.var("LARK_APP_ID").ok().map(|v| v.to_string());
-            let app_secret = self
-                .env
-                .secret("LARK_APP_SECRET")
-                .ok()
-                .map(|s| s.to_string());
-
-            if let (Some(id), Some(secret)) = (app_id, app_secret) {
-                let bot = crate::sinks::lark::LarkBotClient::new(id, secret, http);
-                crate::sinks::lark::try_dm(&event, &bot, email).await;
+        match (&bot, &target_chat_id) {
+            (Some(b), Some(chat_id)) => {
+                if let Err(e) = b.send_to_chat(chat_id, &card.card).await {
+                    worker::console_error!("failed to send card to chat: {e}");
+                }
             }
+            _ => {
+                let webhook_url = self
+                    .env
+                    .var("LARK_WEBHOOK_URL")
+                    .map(|v| v.to_string())
+                    .unwrap_or_default();
+                if !webhook_url.is_empty() {
+                    crate::sinks::lark::webhook::send_lark_card(&http, &webhook_url, &card).await;
+                }
+            }
+        }
+
+        if let (Some(ref email), Some(ref b)) = (&dm_email, &bot) {
+            crate::sinks::lark::try_dm(&event, b, email).await;
         }
 
         Response::ok("dispatched")

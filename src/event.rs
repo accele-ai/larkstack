@@ -55,9 +55,18 @@ impl Priority {
     }
 }
 
+/// Abbreviated commit info for push events.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CommitSummary {
+    pub sha_short: String,
+    pub message_line: String,
+    pub author: String,
+}
+
 /// A normalized event produced by a source and consumed by sinks.
 #[derive(Serialize, Deserialize)]
 pub enum Event {
+    // --- Linear events ---
     IssueCreated {
         #[allow(dead_code)]
         source: String,
@@ -95,24 +104,89 @@ pub enum Event {
         body: String,
         url: String,
     },
+
+    // --- GitHub events ---
+    PrOpened {
+        repo: String,
+        number: u64,
+        title: String,
+        author: String,
+        head_branch: String,
+        base_branch: String,
+        additions: u64,
+        deletions: u64,
+        url: String,
+    },
+    PrReviewRequested {
+        repo: String,
+        number: u64,
+        title: String,
+        author: String,
+        reviewer: String,
+        reviewer_lark_id: Option<String>,
+        url: String,
+    },
+    PrMerged {
+        repo: String,
+        number: u64,
+        title: String,
+        author: String,
+        merged_by: String,
+        url: String,
+    },
+    IssueLabeledAlert {
+        repo: String,
+        number: u64,
+        title: String,
+        label: String,
+        author: String,
+        url: String,
+    },
+    BranchPush {
+        repo: String,
+        branch: String,
+        pusher: String,
+        commits: Vec<CommitSummary>,
+        compare_url: String,
+    },
+    WorkflowRunFailed {
+        repo: String,
+        workflow_name: String,
+        branch: String,
+        actor: String,
+        conclusion: String,
+        url: String,
+    },
+    SecretScanningAlert {
+        repo: String,
+        secret_type: String,
+        url: String,
+    },
+    DependabotAlert {
+        repo: String,
+        package: String,
+        severity: String,
+        summary: String,
+        url: String,
+    },
 }
 
 impl Event {
-    /// Returns the accumulated change descriptions (empty for comments).
+    /// Returns the accumulated change descriptions (empty for non-issue events).
     pub fn changes(&self) -> &[String] {
         match self {
             Event::IssueCreated { changes, .. } | Event::IssueUpdated { changes, .. } => changes,
-            Event::CommentCreated { .. } => &[],
+            _ => &[],
         }
     }
 
-    /// Replaces the change descriptions (no-op for comments).
+    /// Replaces the change descriptions (no-op for non-issue events).
     pub fn set_changes(&mut self, new_changes: Vec<String>) {
         match self {
             Event::IssueCreated { changes, .. } | Event::IssueUpdated { changes, .. } => {
                 *changes = new_changes;
             }
-            Event::CommentCreated { .. } => {}
+            _ => {}
         }
     }
 

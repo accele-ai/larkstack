@@ -1,3 +1,17 @@
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+/// Computes HMAC-SHA256 over `body` using `secret` and compares the
+/// hex-encoded result against `expected_hex`.
+pub fn verify_hmac_sha256(secret: &str, body: &[u8], expected_hex: &str) -> bool {
+    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret.as_bytes()) else {
+        return false;
+    };
+    mac.update(body);
+    let computed = hex::encode(mac.finalize().into_bytes());
+    computed == expected_hex
+}
+
 /// Truncates `s` to at most `max_chars` characters, appending `"…"` when
 /// truncation occurs.
 pub fn truncate(s: &str, max_chars: usize) -> String {
