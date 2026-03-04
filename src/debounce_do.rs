@@ -127,7 +127,7 @@ impl DurableObject for DebounceObject {
             }
         }
 
-        if let (Some(ref email), Some(ref b)) = (&dm_email, &bot) {
+        if let (Some(email), Some(b)) = (&dm_email, &bot) {
             crate::sinks::lark::try_dm(&event, b, email).await;
         }
 
