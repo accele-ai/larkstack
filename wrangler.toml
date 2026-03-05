@@ -3,16 +3,16 @@ main = "build/worker/shim.mjs"
 compatibility_date = "2024-01-01"
 
 [build]
-command = "cargo install worker-build && worker-build --release"
+command = "cargo install worker-build && worker-build --release -- --no-default-features --features cf-worker"
 
 [durable_objects]
 bindings = [{ name = "DEBOUNCER", class_name = "DebounceObject" }]
 
 [[migrations]]
 tag = "v1"
-new_classes = ["DebounceObject"]
+new_sqlite_classes = ["DebounceObject"]
 
 [vars]
-LARK_WEBHOOK_URL = ""
+LARK_WEBHOOK_URL = "https://open.larksuite.com/open-apis/bot/v2/hook/c10edb2b-d186-457e-926d-7f4562846983"
 PORT = "3000"
 DEBOUNCE_DELAY_MS = "5000"
