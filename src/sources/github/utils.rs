@@ -10,9 +10,3 @@ pub fn verify_github_signature(secret: &str, body: &[u8], header_value: &str) ->
     };
     crate::utils::verify_hmac_sha256(secret, body, hex_sig)
 }
-
-/// Extracts the short branch name from a full git ref
-/// (e.g. `"refs/heads/main"` → `"main"`).
-pub fn branch_from_ref(git_ref: &str) -> &str {
-    git_ref.strip_prefix("refs/heads/").unwrap_or(git_ref)
-}

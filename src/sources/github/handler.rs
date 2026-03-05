@@ -26,12 +26,10 @@ use octocrab::models::webhook_events::{
 use crate::{
     config::{AppState, GitHubConfig},
     dispatch,
-    event::{CommitSummary, Event},
+    event::Event,
 };
 
-use super::utils::{branch_from_ref, verify_github_signature};
-
-const MAX_COMMITS: usize = 5;
+use super::utils::verify_github_signature;
 
 // ---------------------------------------------------------------------------
 // Shared thin structs (used by both native and cf-worker)
@@ -156,26 +154,6 @@ mod thin {
     }
 
     #[derive(Deserialize)]
-    pub struct PushPayload {
-        pub r#ref: String,
-        pub commits: Vec<Commit>,
-        pub pusher: CommitUser,
-        pub compare: String,
-    }
-
-    #[derive(Deserialize)]
-    pub struct Commit {
-        pub id: String,
-        pub message: String,
-        pub author: CommitUser,
-    }
-
-    #[derive(Deserialize)]
-    pub struct CommitUser {
-        pub name: String,
-    }
-
-    #[derive(Deserialize)]
     pub struct WorkflowRunPayload {
         pub action: String,
         pub workflow_run: serde_json::Value,
@@ -293,7 +271,6 @@ async fn dispatch_native(
             handle_pull_request(state, github, repo, *payload).await
         }
         WebhookEventPayload::Issues(payload) => handle_issues(state, github, repo, *payload).await,
-        WebhookEventPayload::Push(payload) => handle_push(state, repo, *payload).await,
         WebhookEventPayload::WorkflowRun(payload) => {
             handle_workflow_run(state, repo, *payload).await
         }
@@ -434,42 +411,6 @@ async fn handle_issues(
 }
 
 #[cfg(feature = "native")]
-async fn handle_push(
-    state: &Arc<AppState>,
-    repo: &str,
-    payload: octocrab::models::webhook_events::payload::PushWebhookEventPayload,
-) -> StatusCode {
-    let branch = branch_from_ref(&payload.r#ref);
-    if !is_protected_branch(branch) {
-        info!("ignoring push to non-protected branch: {branch}");
-        return StatusCode::OK;
-    }
-    info!(
-        "GitHub push to {repo}@{branch}: {} commit(s)",
-        payload.commits.len()
-    );
-    let commits: Vec<CommitSummary> = payload
-        .commits
-        .iter()
-        .take(MAX_COMMITS)
-        .map(|c| CommitSummary {
-            sha_short: c.id.chars().take(7).collect(),
-            message_line: c.message.lines().next().unwrap_or("").to_string(),
-            author: c.author.user.name.clone(),
-        })
-        .collect();
-    let event = Event::BranchPush {
-        repo: repo.to_string(),
-        branch: branch.to_string(),
-        pusher: payload.pusher.user.name.clone(),
-        commits,
-        compare_url: payload.compare.to_string(),
-    };
-    dispatch::dispatch_github(&event, state, None).await;
-    StatusCode::OK
-}
-
-#[cfg(feature = "native")]
 async fn handle_workflow_run(
     state: &Arc<AppState>,
     repo: &str,
@@ -542,14 +483,8 @@ async fn dispatch_cf(
             handle_issues_cf(state, github, repo, payload).await
         }
         "push" => {
-            let payload: thin::PushPayload = match serde_json::from_slice(body) {
-                Ok(p) => p,
-                Err(e) => {
-                    warn!("failed to parse push payload: {e}");
-                    return StatusCode::OK;
-                }
-            };
-            handle_push_cf(state, repo, payload).await
+            info!("ignoring push event (not subscribed)");
+            StatusCode::OK
         }
         "workflow_run" => {
             let payload: thin::WorkflowRunPayload = match serde_json::from_slice(body) {
@@ -718,42 +653,6 @@ async fn handle_issues_cf(
     StatusCode::OK
 }
 
-#[cfg(feature = "cf-worker")]
-async fn handle_push_cf(
-    state: &Arc<AppState>,
-    repo: &str,
-    payload: thin::PushPayload,
-) -> StatusCode {
-    let branch = branch_from_ref(&payload.r#ref);
-    if !is_protected_branch(branch) {
-        info!("ignoring push to non-protected branch: {branch}");
-        return StatusCode::OK;
-    }
-    info!(
-        "GitHub push to {repo}@{branch}: {} commit(s)",
-        payload.commits.len()
-    );
-    let commits: Vec<CommitSummary> = payload
-        .commits
-        .iter()
-        .take(MAX_COMMITS)
-        .map(|c| CommitSummary {
-            sha_short: c.id.chars().take(7).collect(),
-            message_line: c.message.lines().next().unwrap_or("").to_string(),
-            author: c.author.name.clone(),
-        })
-        .collect();
-    let event = Event::BranchPush {
-        repo: repo.to_string(),
-        branch: branch.to_string(),
-        pusher: payload.pusher.name.clone(),
-        commits,
-        compare_url: payload.compare.clone(),
-    };
-    dispatch::dispatch_github(&event, state, None).await;
-    StatusCode::OK
-}
-
 // ---------------------------------------------------------------------------
 // Shared inner dispatch helpers (workflow_run / secret_scanning / dependabot)
 // Both native and cf-worker extract inner data as serde_json::Value, then
@@ -857,12 +756,4 @@ async fn dispatch_dependabot(
     };
     dispatch::dispatch_github(&event, state, None).await;
     StatusCode::OK
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn is_protected_branch(branch: &str) -> bool {
-    matches!(branch, "main" | "master") || branch.starts_with("release")
 }

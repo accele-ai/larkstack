@@ -89,8 +89,8 @@ impl DurableObject for DebounceObject {
         let card = crate::sinks::lark::cards::build_lark_card(&event);
         let webhook_url = self
             .env
-            .var("LARK_WEBHOOK_URL")
-            .map(|v| v.to_string())
+            .secret("LARK_WEBHOOK_URL")
+            .map(|s| s.to_string())
             .unwrap_or_default();
         if !webhook_url.is_empty() {
             crate::sinks::lark::webhook::send_lark_card(&http, &webhook_url, &card).await;
