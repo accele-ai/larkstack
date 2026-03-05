@@ -13,32 +13,35 @@ use tracing::error;
 
 use crate::{config::AppState, event::Event};
 
-/// Sends a card notification for `event` to the Lark group.
-///
-/// Prefers Bot API (`target_chat_id`) when available, falls back to the
-/// simple webhook (`webhook_url`).
+/// Sends a card notification for `event` to the Linear group chat via webhook.
 pub async fn notify(event: &Event, state: &AppState) {
     let card = cards::build_lark_card(event);
-
-    match (&state.lark_bot, &state.lark.target_chat_id) {
-        (Some(bot), Some(chat_id)) => {
-            if let Err(e) = bot.send_to_chat(chat_id, &card.card).await {
-                error!("failed to send card to chat {chat_id}: {e}");
-            }
-        }
-        _ if !state.lark.webhook_url.is_empty() => {
-            webhook::send_lark_card(&state.http, &state.lark.webhook_url, &card).await;
-        }
-        _ => {
-            error!(
-                "no Lark delivery method configured (need LARK_TARGET_CHAT_ID + bot, or LARK_WEBHOOK_URL)"
-            );
-        }
+    if !state.lark.webhook_url.is_empty() {
+        webhook::send_lark_card(&state.http, &state.lark.webhook_url, &card).await;
+    } else {
+        error!("LARK_WEBHOOK_URL not configured — Linear group chat notification skipped");
     }
 }
 
-/// DMs the assignee about `event` (no-op when `bot` is `None` or event
-/// does not support DM notifications).
+/// Sends a card notification for `event` to the GitHub group chat via webhook.
+///
+/// Uses `LARK_GITHUB_WEBHOOK_URL` when set, falls back to `LARK_WEBHOOK_URL`.
+pub async fn notify_github(event: &Event, state: &AppState) {
+    let card = cards::build_lark_card(event);
+    let webhook = if !state.lark.github_webhook_url.is_empty() {
+        &state.lark.github_webhook_url
+    } else {
+        &state.lark.webhook_url
+    };
+    if !webhook.is_empty() {
+        webhook::send_lark_card(&state.http, webhook, &card).await;
+    } else {
+        error!("no webhook URL configured — GitHub group chat notification skipped");
+    }
+}
+
+/// Sends a DM about `event` via the enterprise self-built app bot.
+/// No-op when the event does not support DM notifications.
 pub async fn try_dm(event: &Event, bot: &LarkBotClient, email: &str) {
     if let Some(card) = cards::build_assign_dm_card(event)
         && let Err(e) = bot.send_dm(email, &card).await

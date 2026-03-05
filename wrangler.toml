@@ -13,6 +13,5 @@ tag = "v1"
 new_sqlite_classes = ["DebounceObject"]
 
 [vars]
-LARK_WEBHOOK_URL = "https://open.larksuite.com/open-apis/bot/v2/hook/c10edb2b-d186-457e-926d-7f4562846983"
 PORT = "3000"
 DEBOUNCE_DELAY_MS = "5000"
