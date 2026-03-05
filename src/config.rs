@@ -92,9 +92,9 @@ impl LarkConfig {
                 .secret("LARK_GITHUB_WEBHOOK_URL")
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
-            app_id: env.var("LARK_APP_ID").ok().map(|v| v.to_string()),
+            app_id: env.secret("LARK_APP_ID").ok().map(|s| s.to_string()),
             app_secret: env.secret("LARK_APP_SECRET").ok().map(|s| s.to_string()),
-            github_app_id: env.var("LARK_GITHUB_APP_ID").ok().map(|v| v.to_string()),
+            github_app_id: env.secret("LARK_GITHUB_APP_ID").ok().map(|s| s.to_string()),
             github_app_secret: env
                 .secret("LARK_GITHUB_APP_SECRET")
                 .ok()
