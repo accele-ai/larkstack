@@ -40,6 +40,15 @@ mod cf_entry {
                 .await;
                 text_response(status, "")
             }
+            ("POST", "/github/webhook") => {
+                let status = crate::sources::github::webhook_handler(
+                    axum::extract::State(state),
+                    parts.headers,
+                    body_bytes,
+                )
+                .await;
+                text_response(status, "")
+            }
             ("POST", "/lark/event") => {
                 let (status, axum::Json(json)) =
                     crate::sinks::lark::lark_event_handler(axum::extract::State(state), body_bytes)
