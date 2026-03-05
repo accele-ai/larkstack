@@ -58,19 +58,14 @@ pub struct LarkConfig {
     /// Falls back to `webhook_url` when empty.
     #[serde(default)]
     pub github_webhook_url: String,
-    /// Bot API chat ID for Linear group chat.
-    pub target_chat_id: Option<String>,
-    /// Bot API chat ID for GitHub group chat.
-    /// Falls back to `target_chat_id` when absent.
-    pub github_target_chat_id: Option<String>,
-    /// App credentials for the Linear notification bot.
+    /// Enterprise self-built app credentials — used only for Linear DMs.
     pub app_id: Option<String>,
     pub app_secret: Option<String>,
-    /// App credentials for the GitHub notification bot.
+    /// Enterprise self-built app credentials — used only for GitHub review-request DMs.
     /// Falls back to `app_id`/`app_secret` when absent.
     pub github_app_id: Option<String>,
     pub github_app_secret: Option<String>,
-    /// Verification token for the Lark unfurling/event-subscription app.
+    /// Verification token for the Lark URL-unfurling event-subscription app.
     pub verification_token: Option<String>,
 }
 
@@ -90,20 +85,15 @@ impl LarkConfig {
     pub fn from_worker_env(env: &worker::Env) -> Result<Self, String> {
         Ok(Self {
             webhook_url: env
-                .var("LARK_WEBHOOK_URL")
-                .map(|v| v.to_string())
+                .secret("LARK_WEBHOOK_URL")
+                .map(|s| s.to_string())
                 .unwrap_or_default(),
-            target_chat_id: env.var("LARK_TARGET_CHAT_ID").ok().map(|v| v.to_string()),
+            github_webhook_url: env
+                .secret("LARK_GITHUB_WEBHOOK_URL")
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
             app_id: env.var("LARK_APP_ID").ok().map(|v| v.to_string()),
             app_secret: env.secret("LARK_APP_SECRET").ok().map(|s| s.to_string()),
-            github_webhook_url: env
-                .var("LARK_GITHUB_WEBHOOK_URL")
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-            github_target_chat_id: env
-                .var("LARK_GITHUB_TARGET_CHAT_ID")
-                .ok()
-                .map(|v| v.to_string()),
             github_app_id: env.var("LARK_GITHUB_APP_ID").ok().map(|v| v.to_string()),
             github_app_secret: env
                 .secret("LARK_GITHUB_APP_SECRET")
@@ -118,23 +108,23 @@ impl LarkConfig {
 }
 
 impl LarkConfig {
-    pub fn bot_client(&self, http: &Client) -> Option<LarkBotClient> {
+    /// Creates the Linear DM bot client (enterprise self-built app, DMs only).
+    pub fn linear_dm_bot(&self, http: &Client) -> Option<LarkBotClient> {
         match (&self.app_id, &self.app_secret) {
             (Some(id), Some(secret)) => {
-                info!("LARK_APP_ID set – Linear Bot API notifications enabled");
+                info!("LARK_APP_ID set – Linear DM bot enabled");
                 Some(LarkBotClient::new(id.clone(), secret.clone(), http.clone()))
             }
-            _ => {
-                info!("LARK_APP_ID/LARK_APP_SECRET not set – Linear Bot API disabled");
-                None
-            }
+            _ => None,
         }
     }
 
-    pub fn github_bot_client(&self, http: &Client) -> Option<LarkBotClient> {
+    /// Creates the GitHub DM bot client (enterprise self-built app, DMs only).
+    /// Falls back to the Linear DM bot when `LARK_GITHUB_APP_ID` is absent.
+    pub fn github_dm_bot(&self, http: &Client) -> Option<LarkBotClient> {
         match (&self.github_app_id, &self.github_app_secret) {
             (Some(id), Some(secret)) => {
-                info!("LARK_GITHUB_APP_ID set – GitHub Bot API notifications enabled");
+                info!("LARK_GITHUB_APP_ID set – GitHub DM bot enabled");
                 Some(LarkBotClient::new(id.clone(), secret.clone(), http.clone()))
             }
             _ => None,
@@ -320,15 +310,12 @@ impl AppState {
         let github = GitHubConfig::from_env();
 
         let http = Client::new();
-        let lark_bot = lark.bot_client(&http);
-        let github_lark_bot = lark.github_bot_client(&http);
+        let lark_bot = lark.linear_dm_bot(&http);
+        let github_lark_bot = lark.github_dm_bot(&http);
         let linear_client = linear.graphql_client(&http);
 
         if lark.verification_token.is_some() {
             info!("LARK_VERIFICATION_TOKEN set – event verification enabled");
-        }
-        if lark.target_chat_id.is_some() {
-            info!("LARK_TARGET_CHAT_ID set – Linear Bot API group chat enabled");
         }
         if let Some(gh) = &github {
             info!("GITHUB_WEBHOOK_SECRET set – GitHub webhook source enabled");
@@ -364,8 +351,8 @@ impl AppState {
         let github = GitHubConfig::from_worker_env(&env);
 
         let http = Client::new();
-        let lark_bot = lark.bot_client(&http);
-        let github_lark_bot = lark.github_bot_client(&http);
+        let lark_bot = lark.linear_dm_bot(&http);
+        let github_lark_bot = lark.github_dm_bot(&http);
         let linear_client = linear.graphql_client(&http);
 
         Self {
