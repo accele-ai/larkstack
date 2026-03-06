@@ -6,7 +6,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::{sinks::lark::LarkBotClient, sources::linear::client::LinearClient};
+use crate::{
+    sinks::lark::LarkBotClient,
+    sources::{linear::client::LinearClient, x::XClient},
+};
 
 #[cfg(not(feature = "cf-worker"))]
 use crate::debounce::DebounceMap;
@@ -295,6 +298,7 @@ pub struct AppState {
     /// Falls back to `lark_bot` when `None`.
     pub github_lark_bot: Option<LarkBotClient>,
     pub linear_client: Option<LinearClient>,
+    pub x_client: XClient,
     #[cfg(not(feature = "cf-worker"))]
     pub update_debounce: DebounceMap,
     #[cfg(feature = "cf-worker")]
@@ -313,6 +317,8 @@ impl AppState {
         let lark_bot = lark.linear_dm_bot(&http);
         let github_lark_bot = lark.github_dm_bot(&http);
         let linear_client = linear.graphql_client(&http);
+        let x_bearer = std::env::var("X_BEARER_TOKEN").ok();
+        let x_client = XClient::new(x_bearer, http.clone());
 
         if lark.verification_token.is_some() {
             info!("LARK_VERIFICATION_TOKEN set – event verification enabled");
@@ -337,6 +343,7 @@ impl AppState {
             lark_bot,
             github_lark_bot,
             linear_client,
+            x_client,
             update_debounce: DebounceMap::new(),
         }
     }
@@ -354,6 +361,8 @@ impl AppState {
         let lark_bot = lark.linear_dm_bot(&http);
         let github_lark_bot = lark.github_dm_bot(&http);
         let linear_client = linear.graphql_client(&http);
+        let x_bearer = env.secret("X_BEARER_TOKEN").ok().map(|s| s.to_string());
+        let x_client = XClient::new(x_bearer, http.clone());
 
         Self {
             linear,
@@ -364,6 +373,7 @@ impl AppState {
             lark_bot,
             github_lark_bot,
             linear_client,
+            x_client,
             env,
         }
     }
