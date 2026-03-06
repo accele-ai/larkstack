@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::{
     event::{Event, Priority},
-    sources::linear::models::LinearIssueData,
+    sources::{linear::models::LinearIssueData, x::TweetData},
     utils::truncate,
 };
 
@@ -589,4 +589,55 @@ fn build_dependabot_card(
     elements.push(build_link_button(url, "View Alert"));
 
     build_card(color, format!("[{repo}] Dependabot Alert"), elements)
+}
+
+// ---------------------------------------------------------------------------
+// X (Twitter) card builder
+// ---------------------------------------------------------------------------
+
+/// Builds an inline preview card from fetched tweet data.
+///
+/// Returns `(card, inline_title)` where `inline_title` is the short text
+/// shown inline in the chat before the card expands.
+pub fn build_x_preview_card(tweet: &TweetData) -> (LarkCard, String) {
+    let mut elements = vec![];
+
+    if !tweet.text.is_empty() {
+        elements.push(md_div(&truncate(&tweet.text, 200)));
+    }
+
+    if !tweet.author_name.is_empty() {
+        let attribution = if tweet.author_username.is_empty() {
+            tweet.author_name.clone()
+        } else {
+            format!("{} (@{})", tweet.author_name, tweet.author_username)
+        };
+        elements.push(json!({
+            "tag": "note",
+            "elements": [{ "tag": "plain_text", "content": attribution }]
+        }));
+    }
+
+    elements.push(build_link_button(&tweet.url, "View on X"));
+
+    let card = LarkCard {
+        header: LarkHeader {
+            template: "blue".to_string(),
+            title: LarkTitle {
+                content: "[X]".to_string(),
+                tag: "plain_text",
+            },
+        },
+        elements,
+    };
+
+    let inline_title = if !tweet.author_username.is_empty() && !tweet.text.is_empty() {
+        format!("@{}: {}", tweet.author_username, truncate(&tweet.text, 50))
+    } else if !tweet.author_name.is_empty() {
+        tweet.author_name.clone()
+    } else {
+        "X Post".to_string()
+    };
+
+    (card, inline_title)
 }

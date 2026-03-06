@@ -6,9 +6,12 @@ use std::sync::Arc;
 use axum::{Json, body::Bytes, extract::State, http::StatusCode};
 use tracing::{error, info, warn};
 
-use crate::{config::AppState, sources::linear::client::extract_identifier_from_url};
+use crate::{
+    config::AppState,
+    sources::{linear::client::extract_identifier_from_url, x::extract_tweet_id},
+};
 
-use super::cards::build_preview_card;
+use super::cards::{build_preview_card, build_x_preview_card};
 
 /// Handles incoming Lark event callbacks.
 ///
@@ -71,16 +74,11 @@ pub async fn lark_event_handler(
     (StatusCode::OK, Json(serde_json::json!({})))
 }
 
-/// Fetches a Linear issue and returns an inline preview card.
+/// Handles `url.preview.get` — routes to X or Linear preview based on URL.
 async fn handle_link_preview(
     state: &AppState,
     body: &serde_json::Value,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(ref linear) = state.linear_client else {
-        warn!("link preview requested but LINEAR_API_KEY not configured");
-        return (StatusCode::OK, Json(serde_json::json!({})));
-    };
-
     let url = body
         .get("event")
         .and_then(|e| e.get("url"))
@@ -92,6 +90,32 @@ async fn handle_link_preview(
                 .and_then(|v| v.as_str())
         })
         .unwrap_or("");
+
+    // X / Twitter link
+    if let Some(tweet_id) = extract_tweet_id(url) {
+        info!("fetching tweet {tweet_id} for link preview");
+        let tweet = state.x_client.fetch(tweet_id, url).await;
+        let (card, inline_title) = build_x_preview_card(&tweet);
+        info!("built X preview card: {inline_title}");
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "inline": {
+                    "i18n_title": {
+                        "en_us": inline_title,
+                        "zh_cn": inline_title,
+                    }
+                },
+                "card": { "type": "raw", "data": card }
+            })),
+        );
+    }
+
+    // Linear link
+    let Some(ref linear) = state.linear_client else {
+        info!("link preview requested but no handler matched URL: {url}");
+        return (StatusCode::OK, Json(serde_json::json!({})));
+    };
 
     let Some(identifier) = extract_identifier_from_url(url) else {
         info!("could not extract Linear identifier from URL: {url}");
@@ -114,10 +138,7 @@ async fn handle_link_preview(
                             "zh_cn": inline_title,
                         }
                     },
-                    "card": {
-                        "type": "raw",
-                        "data": card
-                    }
+                    "card": { "type": "raw", "data": card }
                 })),
             )
         }

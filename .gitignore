@@ -31,3 +31,5 @@ Thumbs.db
 # ------------------------------------------------------
 # test-webhook.sh
 payload.json
+.dev.vars
+.wrangler/
