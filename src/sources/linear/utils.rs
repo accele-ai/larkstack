@@ -30,6 +30,9 @@ pub fn build_change_fields(issue: &Issue, updated_from: &Option<serde_json::Valu
             .or_else(|| old_state.as_str())
             .unwrap_or("Unknown");
         changes.push(format!("**Status:** {} → {}", old_name, issue.state.name));
+    } else if uf.state_id.is_some() {
+        // Linear only sent the old state UUID — show direction without old name
+        changes.push(format!("**Status →** {}", issue.state.name));
     }
 
     if let Some(old_priority) = uf.priority {
