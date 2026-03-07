@@ -15,3 +15,6 @@ new_sqlite_classes = ["DebounceObject"]
 [vars]
 PORT = "3000"
 DEBOUNCE_DELAY_MS = "5000"
+
+[observability]
+enabled = true

@@ -44,6 +44,9 @@ pub struct Assignee {
 pub struct UpdatedFrom {
     #[serde(default)]
     pub state: Option<serde_json::Value>,
+    /// Linear may send only the old state's UUID instead of a full state object.
+    #[serde(default)]
+    pub state_id: Option<String>,
     #[serde(default)]
     pub priority: Option<u8>,
     #[serde(default)]

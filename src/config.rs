@@ -68,8 +68,13 @@ pub struct LarkConfig {
     /// Falls back to `app_id`/`app_secret` when absent.
     pub github_app_id: Option<String>,
     pub github_app_secret: Option<String>,
-    /// Verification token for the Lark URL-unfurling event-subscription app.
+    /// Verification token for the Linear link-preview app.
     pub verification_token: Option<String>,
+    /// Verification token for the X (Twitter) link-preview app (separate Lark app).
+    /// When set, requests carrying this token are also accepted.
+    pub x_verification_token: Option<String>,
+    /// Encrypt key for the X (Twitter) link-preview app — used to decrypt AES-256-CBC payloads.
+    pub x_encrypt_key: Option<String>,
 }
 
 #[cfg(not(feature = "cf-worker"))]
@@ -106,6 +111,11 @@ impl LarkConfig {
                 .secret("LARK_VERIFICATION_TOKEN")
                 .ok()
                 .map(|s| s.to_string()),
+            x_verification_token: env
+                .secret("LARK_X_VERIFICATION_TOKEN")
+                .ok()
+                .map(|s| s.to_string()),
+            x_encrypt_key: env.secret("LARK_X_ENCRYPT_KEY").ok().map(|s| s.to_string()),
         })
     }
 }
