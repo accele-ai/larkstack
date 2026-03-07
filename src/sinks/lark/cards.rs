@@ -609,41 +609,61 @@ fn build_dependabot_card(
 /// Returns `(card, inline_title)` where `inline_title` is the short text
 /// shown inline in the chat before the card expands.
 pub fn build_x_preview_card(tweet: &TweetData) -> (LarkCard, String) {
+    let author_at = if tweet.author_username.is_empty() {
+        tweet.author_name.clone()
+    } else {
+        format!("@{}", tweet.author_username)
+    };
+
     let mut elements = vec![];
 
     if !tweet.text.is_empty() {
-        elements.push(md_div(&truncate(&tweet.text, 200)));
+        elements.push(json!({
+            "tag": "markdown",
+            "content": truncate(&tweet.text, 200),
+        }));
     }
 
-    if !tweet.author_name.is_empty() {
-        let attribution = if tweet.author_username.is_empty() {
-            tweet.author_name.clone()
-        } else {
-            format!("{} (@{})", tweet.author_name, tweet.author_username)
-        };
+    // Note: metrics + author combined, matching Python reference layout
+    let note_text = if tweet.like_count.is_some() || tweet.retweet_count.is_some() {
+        let likes = tweet.like_count.unwrap_or(0);
+        let retweets = tweet.retweet_count.unwrap_or(0);
+        format!("❤️ {likes}  🔁 {retweets}  •  {author_at} on X")
+    } else if !author_at.is_empty() {
+        format!("From {author_at} on X")
+    } else {
+        String::new()
+    };
+    if !note_text.is_empty() {
         elements.push(json!({
             "tag": "note",
-            "elements": [{ "tag": "plain_text", "content": attribution }]
+            "elements": [{ "tag": "plain_text", "content": note_text }]
         }));
     }
 
     elements.push(build_link_button(&tweet.url, "View on X"));
 
+    let header_title = if tweet.author_name.is_empty() {
+        "X Post".to_string()
+    } else {
+        tweet.author_name.clone()
+    };
+
     let card = LarkCard {
         header: LarkHeader {
             template: "blue".to_string(),
             title: LarkTitle {
-                content: "[X]".to_string(),
+                content: header_title,
                 tag: "plain_text",
             },
         },
         elements,
     };
 
-    let inline_title = if !tweet.author_username.is_empty() && !tweet.text.is_empty() {
-        format!("@{}: {}", tweet.author_username, truncate(&tweet.text, 50))
-    } else if !tweet.author_name.is_empty() {
-        tweet.author_name.clone()
+    let inline_title = if !author_at.is_empty() && !tweet.text.is_empty() {
+        format!("{}: {}...", author_at, truncate(&tweet.text, 30))
+    } else if !author_at.is_empty() {
+        format!("Post by {author_at}")
     } else {
         "X Post".to_string()
     };
