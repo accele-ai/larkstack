@@ -123,6 +123,7 @@ pub fn build_lark_card(event: &Event) -> LarkMessage {
         Event::IssueUpdated {
             identifier,
             title,
+            description,
             status,
             priority,
             assignee,
@@ -133,7 +134,7 @@ pub fn build_lark_card(event: &Event) -> LarkMessage {
             "Updated",
             identifier,
             title,
-            None,
+            description.as_deref(),
             status,
             priority,
             assignee.as_deref(),
@@ -369,14 +370,22 @@ fn build_issue_card(
 
     elements.push(md_div(&format!("**{title}**")));
 
-    if let Some(desc) = description {
+    let has_desc = if let Some(desc) = description {
         let trimmed = desc.trim();
         if !trimmed.is_empty() {
-            elements.push(md_div(&truncate(trimmed, 200)));
+            elements.push(md_div(&format!("*{}*", truncate(trimmed, 150))));
+            true
+        } else {
+            false
         }
-    }
+    } else {
+        false
+    };
 
     if !changes.is_empty() {
+        if has_desc {
+            elements.push(md_div("---"));
+        }
         elements.push(md_div(&changes.join("\n")));
     }
 
