@@ -1,10 +1,15 @@
+use std::collections::HashMap;
+
 #[cfg(not(feature = "cf-worker"))]
 use figment::{Figment, providers::Env};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::{sinks::lark::LarkBotClient, sources::linear::client::LinearClient};
+use crate::{
+    sinks::lark::LarkBotClient,
+    sources::{linear::client::LinearClient, x::XClient},
+};
 
 #[cfg(not(feature = "cf-worker"))]
 use crate::debounce::DebounceMap;
@@ -49,11 +54,27 @@ impl LinearConfig {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct LarkConfig {
+    /// Incoming webhook URL for Linear group chat notifications.
     #[serde(default)]
     pub webhook_url: String,
+    /// Incoming webhook URL for GitHub group chat notifications.
+    /// Falls back to `webhook_url` when empty.
+    #[serde(default)]
+    pub github_webhook_url: String,
+    /// Enterprise self-built app credentials — used only for Linear DMs.
     pub app_id: Option<String>,
     pub app_secret: Option<String>,
+    /// Enterprise self-built app credentials — used only for GitHub review-request DMs.
+    /// Falls back to `app_id`/`app_secret` when absent.
+    pub github_app_id: Option<String>,
+    pub github_app_secret: Option<String>,
+    /// Verification token for the Linear link-preview app.
     pub verification_token: Option<String>,
+    /// Verification token for the X (Twitter) link-preview app (separate Lark app).
+    /// When set, requests carrying this token are also accepted.
+    pub x_verification_token: Option<String>,
+    /// Encrypt key for the X (Twitter) link-preview app — used to decrypt AES-256-CBC payloads.
+    pub x_encrypt_key: Option<String>,
 }
 
 #[cfg(not(feature = "cf-worker"))]
@@ -72,31 +93,151 @@ impl LarkConfig {
     pub fn from_worker_env(env: &worker::Env) -> Result<Self, String> {
         Ok(Self {
             webhook_url: env
-                .var("LARK_WEBHOOK_URL")
-                .map(|v| v.to_string())
+                .secret("LARK_WEBHOOK_URL")
+                .map(|s| s.to_string())
                 .unwrap_or_default(),
-            app_id: env.var("LARK_APP_ID").ok().map(|v| v.to_string()),
+            github_webhook_url: env
+                .secret("LARK_GITHUB_WEBHOOK_URL")
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            app_id: env.secret("LARK_APP_ID").ok().map(|s| s.to_string()),
             app_secret: env.secret("LARK_APP_SECRET").ok().map(|s| s.to_string()),
+            github_app_id: env.secret("LARK_GITHUB_APP_ID").ok().map(|s| s.to_string()),
+            github_app_secret: env
+                .secret("LARK_GITHUB_APP_SECRET")
+                .ok()
+                .map(|s| s.to_string()),
             verification_token: env
                 .secret("LARK_VERIFICATION_TOKEN")
                 .ok()
                 .map(|s| s.to_string()),
+            x_verification_token: env
+                .secret("LARK_X_VERIFICATION_TOKEN")
+                .ok()
+                .map(|s| s.to_string()),
+            x_encrypt_key: env.secret("LARK_X_ENCRYPT_KEY").ok().map(|s| s.to_string()),
         })
     }
 }
 
 impl LarkConfig {
-    pub fn bot_client(&self, http: &Client) -> Option<LarkBotClient> {
+    /// Creates the Linear DM bot client (enterprise self-built app, DMs only).
+    pub fn linear_dm_bot(&self, http: &Client) -> Option<LarkBotClient> {
         match (&self.app_id, &self.app_secret) {
             (Some(id), Some(secret)) => {
-                info!("lark bot configured – DM notifications enabled");
+                info!("LARK_APP_ID set – Linear DM bot enabled");
                 Some(LarkBotClient::new(id.clone(), secret.clone(), http.clone()))
             }
-            _ => {
-                info!("LARK_APP_ID/LARK_APP_SECRET not set – DM notifications disabled");
-                None
-            }
+            _ => None,
         }
+    }
+
+    /// Creates the GitHub DM bot client (enterprise self-built app, DMs only).
+    /// Falls back to the Linear DM bot when `LARK_GITHUB_APP_ID` is absent.
+    pub fn github_dm_bot(&self, http: &Client) -> Option<LarkBotClient> {
+        match (&self.github_app_id, &self.github_app_secret) {
+            (Some(id), Some(secret)) => {
+                info!("LARK_GITHUB_APP_ID set – GitHub DM bot enabled");
+                Some(LarkBotClient::new(id.clone(), secret.clone(), http.clone()))
+            }
+            _ => None,
+        }
+    }
+}
+
+fn default_alert_labels() -> Vec<String> {
+    vec!["bug".into(), "urgent".into(), "p0".into()]
+}
+
+#[derive(Debug)]
+pub struct GitHubConfig {
+    pub webhook_secret: String,
+    pub user_map: HashMap<String, String>,
+    pub alert_labels: Vec<String>,
+    pub repo_whitelist: Vec<String>,
+    pub pat: Option<String>,
+}
+
+#[cfg(not(feature = "cf-worker"))]
+impl GitHubConfig {
+    pub fn from_env() -> Option<Self> {
+        let secret = std::env::var("GITHUB_WEBHOOK_SECRET").ok()?;
+
+        let user_map: HashMap<String, String> = std::env::var("GITHUB_USER_MAP")
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+        let alert_labels: Vec<String> = std::env::var("GITHUB_ALERT_LABELS")
+            .ok()
+            .map(|s| s.split(',').map(|l| l.trim().to_lowercase()).collect())
+            .unwrap_or_else(default_alert_labels);
+
+        let repo_whitelist: Vec<String> = std::env::var("GITHUB_REPO_WHITELIST")
+            .ok()
+            .map(|s| {
+                s.split(',')
+                    .map(|r| r.trim().to_string())
+                    .filter(|r| !r.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let pat = std::env::var("GITHUB_PAT").ok();
+
+        Some(Self {
+            webhook_secret: secret,
+            user_map,
+            alert_labels,
+            repo_whitelist,
+            pat,
+        })
+    }
+}
+
+#[cfg(feature = "cf-worker")]
+impl GitHubConfig {
+    pub fn from_worker_env(env: &worker::Env) -> Option<Self> {
+        let secret = env.secret("GITHUB_WEBHOOK_SECRET").ok()?.to_string();
+
+        let user_map: HashMap<String, String> = env
+            .var("GITHUB_USER_MAP")
+            .ok()
+            .and_then(|v| serde_json::from_str(&v.to_string()).ok())
+            .unwrap_or_default();
+
+        let alert_labels: Vec<String> = env
+            .var("GITHUB_ALERT_LABELS")
+            .ok()
+            .map(|v| {
+                v.to_string()
+                    .split(',')
+                    .map(|l| l.trim().to_lowercase())
+                    .collect()
+            })
+            .unwrap_or_else(default_alert_labels);
+
+        let repo_whitelist: Vec<String> = env
+            .var("GITHUB_REPO_WHITELIST")
+            .ok()
+            .map(|v| {
+                v.to_string()
+                    .split(',')
+                    .map(|r| r.trim().to_string())
+                    .filter(|r| !r.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let pat = env.secret("GITHUB_PAT").ok().map(|s| s.to_string());
+
+        Some(Self {
+            webhook_secret: secret,
+            user_map,
+            alert_labels,
+            repo_whitelist,
+            pat,
+        })
     }
 }
 
@@ -159,9 +300,15 @@ pub struct AppState {
     pub linear: LinearConfig,
     pub lark: LarkConfig,
     pub server: ServerConfig,
+    pub github: Option<GitHubConfig>,
     pub http: Client,
+    /// Bot client for the Linear notification app.
     pub lark_bot: Option<LarkBotClient>,
+    /// Bot client for the GitHub notification app.
+    /// Falls back to `lark_bot` when `None`.
+    pub github_lark_bot: Option<LarkBotClient>,
     pub linear_client: Option<LinearClient>,
+    pub x_client: XClient,
     #[cfg(not(feature = "cf-worker"))]
     pub update_debounce: DebounceMap,
     #[cfg(feature = "cf-worker")]
@@ -174,13 +321,26 @@ impl AppState {
         let linear = LinearConfig::from_env().expect("invalid linear config");
         let lark = LarkConfig::from_env().expect("invalid lark config");
         let server = ServerConfig::from_env().expect("invalid server config");
+        let github = GitHubConfig::from_env();
 
         let http = Client::new();
-        let lark_bot = lark.bot_client(&http);
+        let lark_bot = lark.linear_dm_bot(&http);
+        let github_lark_bot = lark.github_dm_bot(&http);
         let linear_client = linear.graphql_client(&http);
+        let x_bearer = std::env::var("X_BEARER_TOKEN").ok();
+        let x_client = XClient::new(x_bearer, http.clone());
 
         if lark.verification_token.is_some() {
             info!("LARK_VERIFICATION_TOKEN set – event verification enabled");
+        }
+        if let Some(gh) = &github {
+            info!("GITHUB_WEBHOOK_SECRET set – GitHub webhook source enabled");
+            if !gh.repo_whitelist.is_empty() {
+                info!("GitHub repo whitelist: {:?}", gh.repo_whitelist);
+            }
+            if gh.pat.is_some() {
+                info!("GITHUB_PAT set – outbound GitHub API enabled");
+            }
         }
         info!("debounce delay: {}ms", server.debounce_delay_ms);
 
@@ -188,9 +348,12 @@ impl AppState {
             linear,
             lark,
             server,
+            github,
             http,
             lark_bot,
+            github_lark_bot,
             linear_client,
+            x_client,
             update_debounce: DebounceMap::new(),
         }
     }
@@ -202,18 +365,25 @@ impl AppState {
         let linear = LinearConfig::from_worker_env(&env).expect("invalid linear config");
         let lark = LarkConfig::from_worker_env(&env).expect("invalid lark config");
         let server = ServerConfig::from_worker_env(&env).expect("invalid server config");
+        let github = GitHubConfig::from_worker_env(&env);
 
         let http = Client::new();
-        let lark_bot = lark.bot_client(&http);
+        let lark_bot = lark.linear_dm_bot(&http);
+        let github_lark_bot = lark.github_dm_bot(&http);
         let linear_client = linear.graphql_client(&http);
+        let x_bearer = env.secret("X_BEARER_TOKEN").ok().map(|s| s.to_string());
+        let x_client = XClient::new(x_bearer, http.clone());
 
         Self {
             linear,
             lark,
             server,
+            github,
             http,
             lark_bot,
+            github_lark_bot,
             linear_client,
+            x_client,
             env,
         }
     }

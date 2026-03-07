@@ -84,24 +84,30 @@ impl DurableObject for DebounceObject {
         storage.delete_all().await?;
 
         let http = reqwest::Client::new();
+
+        // Deliver to the Linear group chat via incoming webhook.
+        let card = crate::sinks::lark::cards::build_lark_card(&event);
         let webhook_url = self
             .env
-            .var("LARK_WEBHOOK_URL")
-            .map(|v| v.to_string())
+            .secret("LARK_WEBHOOK_URL")
+            .map(|s| s.to_string())
             .unwrap_or_default();
+        if !webhook_url.is_empty() {
+            crate::sinks::lark::webhook::send_lark_card(&http, &webhook_url, &card).await;
+        } else {
+            worker::console_error!("LARK_WEBHOOK_URL not configured — group notification skipped");
+        }
 
-        crate::sinks::lark::notify(&event, &http, &webhook_url).await;
-
-        if let Some(ref email) = dm_email {
+        // Send DM via the Linear DM bot (enterprise self-built app).
+        if let Some(email) = &dm_email {
             let app_id = self.env.var("LARK_APP_ID").ok().map(|v| v.to_string());
             let app_secret = self
                 .env
                 .secret("LARK_APP_SECRET")
                 .ok()
                 .map(|s| s.to_string());
-
             if let (Some(id), Some(secret)) = (app_id, app_secret) {
-                let bot = crate::sinks::lark::LarkBotClient::new(id, secret, http);
+                let bot = crate::sinks::lark::LarkBotClient::new(id, secret, http.clone());
                 crate::sinks::lark::try_dm(&event, &bot, email).await;
             }
         }
