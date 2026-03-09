@@ -34,6 +34,7 @@ impl DurableObject for DebounceObject {
             serde_json::from_value(body["dm_email"].clone()).unwrap_or(None);
         let delay_ms: u64 = serde_json::from_value(body["delay_ms"].clone())
             .map_err(|e| Error::RustError(format!("parse delay: {e}")))?;
+        let max_wait_ms: u64 = body["max_wait_ms"].as_u64().unwrap_or(120_000);
 
         let storage = self.state.storage();
 
@@ -66,8 +67,24 @@ impl DurableObject for DebounceObject {
             storage.put("dm_email", email).await?;
         }
 
+        // Track when the first event in this window arrived for max_wait enforcement.
+        let now_ms = js_sys::Date::now() as u64;
+        let first_received_ms: u64 = storage
+            .get::<u64>("first_received_ms")
+            .await
+            .unwrap_or(None)
+            .unwrap_or(now_ms);
+        storage.put("first_received_ms", &first_received_ms).await?;
+
+        // Respect max_wait: never delay longer than max_wait_ms from the first event.
+        let elapsed_ms = now_ms.saturating_sub(first_received_ms);
+        let remaining_max = max_wait_ms.saturating_sub(elapsed_ms);
+        let actual_delay = delay_ms.min(remaining_max).max(1);
+
         // Schedule (or reschedule) the alarm.
-        storage.set_alarm(Duration::from_millis(delay_ms)).await?;
+        storage
+            .set_alarm(Duration::from_millis(actual_delay))
+            .await?;
 
         Response::ok("scheduled")
     }

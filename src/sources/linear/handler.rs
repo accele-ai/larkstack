@@ -181,16 +181,21 @@ async fn schedule_debounce(
     event: Event,
     dm_email: Option<String>,
 ) {
-    let cancel_rx = state
+    let (cancel_rx, actual_delay) = state
         .update_debounce
-        .upsert(issue_id.clone(), event, dm_email)
+        .upsert(
+            issue_id.clone(),
+            event,
+            dm_email,
+            state.server.debounce_delay_ms,
+            state.server.debounce_max_wait_ms,
+        )
         .await;
 
     let state2 = Arc::clone(state);
-    let delay = state.server.debounce_delay_ms;
     tokio::spawn(async move {
         tokio::select! {
-            _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(actual_delay)) => {
                 if let Some(p) = state2.update_debounce.take(&issue_id).await {
                     send_debounced_notification(&state2, p).await;
                 }
@@ -211,6 +216,7 @@ async fn schedule_debounce(
         "event": event,
         "dm_email": dm_email,
         "delay_ms": state.server.debounce_delay_ms,
+        "max_wait_ms": state.server.debounce_max_wait_ms,
     });
 
     let body = serde_json::to_string(&payload).unwrap();
