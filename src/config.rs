@@ -246,7 +246,11 @@ fn default_port() -> u16 {
 }
 
 fn default_debounce() -> u64 {
-    5000
+    30_000
+}
+
+fn default_debounce_max_wait() -> u64 {
+    120_000
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -255,6 +259,10 @@ pub struct ServerConfig {
     pub port: u16,
     #[serde(default = "default_debounce")]
     pub debounce_delay_ms: u64,
+    /// Hard cap: fire at most this many ms after the first event in a window,
+    /// even if new events keep arriving (prevents indefinite delay).
+    #[serde(default = "default_debounce_max_wait")]
+    pub debounce_max_wait_ms: u64,
 }
 
 impl Default for ServerConfig {
@@ -262,6 +270,7 @@ impl Default for ServerConfig {
         Self {
             port: default_port(),
             debounce_delay_ms: default_debounce(),
+            debounce_max_wait_ms: default_debounce_max_wait(),
         }
     }
 }
@@ -271,7 +280,7 @@ impl ServerConfig {
     pub fn from_env() -> Result<Self, Box<figment::Error>> {
         Figment::new()
             .merge(figment::providers::Serialized::defaults(Self::default()))
-            .merge(Env::raw().only(&["PORT", "DEBOUNCE_DELAY_MS"]))
+            .merge(Env::raw().only(&["PORT", "DEBOUNCE_DELAY_MS", "DEBOUNCE_MAX_WAIT_MS"]))
             .extract()
             .map_err(Box::new)
     }
@@ -291,6 +300,11 @@ impl ServerConfig {
                 .ok()
                 .and_then(|v| v.to_string().parse().ok())
                 .unwrap_or_else(default_debounce),
+            debounce_max_wait_ms: env
+                .var("DEBOUNCE_MAX_WAIT_MS")
+                .ok()
+                .and_then(|v| v.to_string().parse().ok())
+                .unwrap_or_else(default_debounce_max_wait),
         })
     }
 }

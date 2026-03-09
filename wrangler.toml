@@ -14,7 +14,8 @@ new_sqlite_classes = ["DebounceObject"]
 
 [vars]
 PORT = "3000"
-DEBOUNCE_DELAY_MS = "5000"
+DEBOUNCE_DELAY_MS = "30000"
+DEBOUNCE_MAX_WAIT_MS = "120000"
 
 [observability]
 enabled = true
