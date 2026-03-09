@@ -11,7 +11,14 @@ pub fn verify_signature(secret: &str, body: &[u8], signature: &str) -> bool {
 
 /// Compares the current [`Issue`] state against `updated_from` and returns
 /// human-readable change descriptions (e.g. `"**Status:** Todo → In Progress"`).
-pub fn build_change_fields(issue: &Issue, updated_from: &Option<serde_json::Value>) -> Vec<String> {
+///
+/// `resolved_old_state` is the pre-resolved display name for the old workflow
+/// state when Linear only sent a `stateId` UUID. Pass `None` if unavailable.
+pub fn build_change_fields(
+    issue: &Issue,
+    updated_from: &Option<serde_json::Value>,
+    resolved_old_state: Option<&str>,
+) -> Vec<String> {
     let mut changes = Vec::new();
 
     let Some(uf_value) = updated_from else {
@@ -31,8 +38,8 @@ pub fn build_change_fields(issue: &Issue, updated_from: &Option<serde_json::Valu
             .unwrap_or("Unknown");
         changes.push(format!("**Status:** {} → {}", old_name, issue.state.name));
     } else if uf.state_id.is_some() {
-        // Linear only sent the old state UUID — show direction without old name
-        changes.push(format!("**Status →** {}", issue.state.name));
+        let old_name = resolved_old_state.unwrap_or("Unknown");
+        changes.push(format!("**Status:** {} → {}", old_name, issue.state.name));
     }
 
     if let Some(old_priority) = uf.priority {

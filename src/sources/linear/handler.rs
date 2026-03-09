@@ -91,7 +91,21 @@ pub async fn webhook_handler(
                 }
             };
 
-            let changes = build_change_fields(&issue, &payload.updated_from);
+            // Resolve old state name from UUID when Linear only sends stateId.
+            let old_state_id = payload
+                .updated_from
+                .as_ref()
+                .and_then(|uf| serde_json::from_value::<UpdatedFrom>(uf.clone()).ok())
+                .and_then(|uf| uf.state_id);
+            let resolved_old_state: Option<String> =
+                if let (Some(id), Some(client)) = (&old_state_id, &state.linear_client) {
+                    client.state_name(id).await
+                } else {
+                    None
+                };
+
+            let changes =
+                build_change_fields(&issue, &payload.updated_from, resolved_old_state.as_deref());
 
             info!(
                 "queuing debounced Issue update – {} {} (changes: {})",
