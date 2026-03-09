@@ -91,7 +91,21 @@ pub async fn webhook_handler(
                 }
             };
 
-            let changes = build_change_fields(&issue, &payload.updated_from);
+            // Resolve old state name from UUID when Linear only sends stateId.
+            let old_state_id = payload
+                .updated_from
+                .as_ref()
+                .and_then(|uf| serde_json::from_value::<UpdatedFrom>(uf.clone()).ok())
+                .and_then(|uf| uf.state_id);
+            let resolved_old_state: Option<String> =
+                if let (Some(id), Some(client)) = (&old_state_id, &state.linear_client) {
+                    client.state_name(id).await
+                } else {
+                    None
+                };
+
+            let changes =
+                build_change_fields(&issue, &payload.updated_from, resolved_old_state.as_deref());
 
             info!(
                 "queuing debounced Issue update – {} {} (changes: {})",
@@ -181,16 +195,21 @@ async fn schedule_debounce(
     event: Event,
     dm_email: Option<String>,
 ) {
-    let cancel_rx = state
+    let (cancel_rx, actual_delay) = state
         .update_debounce
-        .upsert(issue_id.clone(), event, dm_email)
+        .upsert(
+            issue_id.clone(),
+            event,
+            dm_email,
+            state.server.debounce_delay_ms,
+            state.server.debounce_max_wait_ms,
+        )
         .await;
 
     let state2 = Arc::clone(state);
-    let delay = state.server.debounce_delay_ms;
     tokio::spawn(async move {
         tokio::select! {
-            _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(actual_delay)) => {
                 if let Some(p) = state2.update_debounce.take(&issue_id).await {
                     send_debounced_notification(&state2, p).await;
                 }
@@ -211,6 +230,7 @@ async fn schedule_debounce(
         "event": event,
         "dm_email": dm_email,
         "delay_ms": state.server.debounce_delay_ms,
+        "max_wait_ms": state.server.debounce_max_wait_ms,
     });
 
     let body = serde_json::to_string(&payload).unwrap();

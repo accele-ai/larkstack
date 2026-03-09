@@ -30,3 +30,6 @@ Thumbs.db
 # 请取消下面这行的注释（去掉 # 号）
 # ------------------------------------------------------
 # test-webhook.sh
+payload.json
+.dev.vars
+.wrangler/

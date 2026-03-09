@@ -29,6 +29,10 @@ async fn main() {
             post(larkstack::sources::linear::webhook_handler),
         )
         .route(
+            "/github/webhook",
+            post(larkstack::sources::github::webhook_handler),
+        )
+        .route(
             "/lark/event",
             post(larkstack::sinks::lark::lark_event_handler),
         )
