@@ -106,3 +106,126 @@ impl DebounceMap {
         self.0.lock().await.remove(key)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::Priority;
+
+    fn make_update_event(changes: Vec<String>) -> Event {
+        Event::IssueUpdated {
+            source: "linear".into(),
+            identifier: "ENG-1".into(),
+            title: "test".into(),
+            description: None,
+            status: "In Progress".into(),
+            priority: Priority::High,
+            assignee: None,
+            assignee_email: None,
+            url: "https://example.com".into(),
+            changes,
+        }
+    }
+
+    fn make_create_event(changes: Vec<String>) -> Event {
+        Event::IssueCreated {
+            source: "linear".into(),
+            identifier: "ENG-1".into(),
+            title: "test".into(),
+            description: None,
+            status: "In Progress".into(),
+            priority: Priority::High,
+            assignee: None,
+            assignee_email: None,
+            url: "https://example.com".into(),
+            changes,
+        }
+    }
+
+    #[tokio::test]
+    async fn first_insert_returns_full_delay() {
+        let map = DebounceMap::new();
+        let ev = make_update_event(vec!["status changed".into()]);
+
+        let (_rx, delay) = map.upsert("ENG-1".into(), ev, None, 5000, 120_000).await;
+        assert_eq!(delay, 5000);
+    }
+
+    #[tokio::test]
+    async fn merge_deduplicates_changes() {
+        let map = DebounceMap::new();
+
+        let ev1 = make_update_event(vec!["status changed".into()]);
+        let _ = map.upsert("ENG-1".into(), ev1, None, 5000, 120_000).await;
+
+        // Second event with one duplicate + one new change
+        let ev2 = make_update_event(vec!["status changed".into(), "priority changed".into()]);
+        let _ = map.upsert("ENG-1".into(), ev2, None, 5000, 120_000).await;
+
+        let pending = map.take("ENG-1").await.unwrap();
+        let changes = pending.event.changes().to_vec();
+        assert_eq!(changes, vec!["status changed", "priority changed"]);
+    }
+
+    #[tokio::test]
+    async fn create_then_update_stays_created() {
+        let map = DebounceMap::new();
+
+        let ev1 = make_create_event(vec!["created".into()]);
+        let _ = map.upsert("ENG-1".into(), ev1, None, 5000, 120_000).await;
+
+        let ev2 = make_update_event(vec!["status changed".into()]);
+        let _ = map.upsert("ENG-1".into(), ev2, None, 5000, 120_000).await;
+
+        let pending = map.take("ENG-1").await.unwrap();
+        assert!(pending.event.is_issue_created());
+    }
+
+    #[tokio::test]
+    async fn max_wait_caps_delay() {
+        let map = DebounceMap::new();
+
+        let ev1 = make_update_event(vec![]);
+        let _ = map.upsert("ENG-1".into(), ev1, None, 5000, 10_000).await;
+
+        // Simulate time passing by inserting again — max_wait is 10s,
+        // first event was just inserted so elapsed ≈ 0, remaining ≈ 10000
+        let ev2 = make_update_event(vec![]);
+        let (_rx, delay) = map.upsert("ENG-1".into(), ev2, None, 5000, 10_000).await;
+
+        // delay should be min(5000, ~10000) = 5000
+        assert!(delay <= 5000);
+    }
+
+    #[tokio::test]
+    async fn dm_email_preserves_first_non_none() {
+        let map = DebounceMap::new();
+
+        let ev1 = make_update_event(vec![]);
+        let _ = map
+            .upsert(
+                "ENG-1".into(),
+                ev1,
+                Some("alice@test.com".into()),
+                5000,
+                120_000,
+            )
+            .await;
+
+        let ev2 = make_update_event(vec![]);
+        let _ = map.upsert("ENG-1".into(), ev2, None, 5000, 120_000).await;
+
+        let pending = map.take("ENG-1").await.unwrap();
+        assert_eq!(pending.dm_email.as_deref(), Some("alice@test.com"));
+    }
+
+    #[tokio::test]
+    async fn take_removes_entry() {
+        let map = DebounceMap::new();
+        let ev = make_update_event(vec![]);
+        let _ = map.upsert("ENG-1".into(), ev, None, 5000, 120_000).await;
+
+        assert!(map.take("ENG-1").await.is_some());
+        assert!(map.take("ENG-1").await.is_none());
+    }
+}

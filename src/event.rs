@@ -226,3 +226,118 @@ impl Event {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- Priority mapping -----------------------------------------------------
+
+    #[test]
+    fn priority_from_linear_known_values() {
+        assert!(matches!(Priority::from_linear(1), Priority::Urgent));
+        assert!(matches!(Priority::from_linear(2), Priority::High));
+        assert!(matches!(Priority::from_linear(3), Priority::Medium));
+        assert!(matches!(Priority::from_linear(4), Priority::Low));
+    }
+
+    #[test]
+    fn priority_from_linear_unknown_defaults_to_none() {
+        assert!(matches!(Priority::from_linear(0), Priority::None));
+        assert!(matches!(Priority::from_linear(5), Priority::None));
+        assert!(matches!(Priority::from_linear(255), Priority::None));
+    }
+
+    #[test]
+    fn priority_display_format() {
+        assert_eq!(Priority::Urgent.display(), "🔴 Urgent");
+        assert_eq!(Priority::None.display(), "⚪ None");
+    }
+
+    // -- Event helpers --------------------------------------------------------
+
+    fn make_issue_updated(changes: Vec<String>) -> Event {
+        Event::IssueUpdated {
+            source: "linear".into(),
+            identifier: "ENG-1".into(),
+            title: "test".into(),
+            description: None,
+            status: "In Progress".into(),
+            priority: Priority::High,
+            assignee: None,
+            assignee_email: None,
+            url: "https://example.com".into(),
+            changes,
+        }
+    }
+
+    fn make_issue_created(changes: Vec<String>) -> Event {
+        Event::IssueCreated {
+            source: "linear".into(),
+            identifier: "ENG-1".into(),
+            title: "test".into(),
+            description: None,
+            status: "In Progress".into(),
+            priority: Priority::High,
+            assignee: None,
+            assignee_email: None,
+            url: "https://example.com".into(),
+            changes,
+        }
+    }
+
+    #[test]
+    fn changes_returns_vec_for_issue_events() {
+        let ev = make_issue_updated(vec!["status changed".into()]);
+        assert_eq!(ev.changes(), &["status changed".to_string()]);
+    }
+
+    #[test]
+    fn changes_returns_empty_for_non_issue_events() {
+        let ev = Event::PrMerged {
+            repo: "r".into(),
+            number: 1,
+            title: "t".into(),
+            author: "a".into(),
+            merged_by: "m".into(),
+            url: "u".into(),
+        };
+        assert!(ev.changes().is_empty());
+    }
+
+    #[test]
+    fn promote_to_created_converts_updated() {
+        let ev = make_issue_updated(vec!["change".into()]);
+        let promoted = ev.promote_to_created();
+        assert!(promoted.is_issue_created());
+        assert_eq!(promoted.changes(), &["change".to_string()]);
+    }
+
+    #[test]
+    fn promote_to_created_preserves_created() {
+        let ev = make_issue_created(vec![]);
+        let promoted = ev.promote_to_created();
+        assert!(promoted.is_issue_created());
+    }
+
+    #[test]
+    fn promote_to_created_no_op_for_other_variants() {
+        let ev = Event::PrMerged {
+            repo: "r".into(),
+            number: 1,
+            title: "t".into(),
+            author: "a".into(),
+            merged_by: "m".into(),
+            url: "u".into(),
+        };
+        let result = ev.promote_to_created();
+        assert!(!result.is_issue_created());
+    }
+
+    #[test]
+    fn set_changes_updates_issue_event() {
+        let mut ev = make_issue_updated(vec!["old".into()]);
+        ev.set_changes(vec!["new1".into(), "new2".into()]);
+        assert_eq!(ev.changes(), &["new1".to_string(), "new2".to_string()]);
+    }
+}
