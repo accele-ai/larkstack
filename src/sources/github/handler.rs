@@ -227,10 +227,9 @@ pub async fn webhook_handler(
     };
 
     if !github.repo_whitelist.is_empty()
-        && !repo_name.is_empty()
-        && !github.repo_whitelist.contains(&repo_name)
+        && (repo_name.is_empty() || !github.repo_whitelist.contains(&repo_name))
     {
-        info!("ignoring event from non-whitelisted repo: {repo_name}");
+        info!("ignoring event from non-whitelisted repo: {repo_name:?}");
         return StatusCode::OK;
     }
 

@@ -635,10 +635,7 @@ pub fn build_x_preview_card(tweet: &TweetData) -> (LarkCard, String) {
         String::new()
     };
     if !note_text.is_empty() {
-        elements.push(json!({
-            "tag": "note",
-            "elements": [{ "tag": "plain_text", "content": note_text }]
-        }));
+        elements.push(md_div(&note_text));
     }
 
     elements.push(build_link_button(&tweet.url, "View on X"));
