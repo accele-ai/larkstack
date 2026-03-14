@@ -8,8 +8,10 @@ pub fn verify_hmac_sha256(secret: &str, body: &[u8], expected_hex: &str) -> bool
         return false;
     };
     mac.update(body);
-    let computed = hex::encode(mac.finalize().into_bytes());
-    computed == expected_hex
+    let Ok(expected_bytes) = hex::decode(expected_hex) else {
+        return false;
+    };
+    mac.verify_slice(&expected_bytes).is_ok()
 }
 
 /// Truncates `s` to at most `max_chars` characters, appending `"…"` when

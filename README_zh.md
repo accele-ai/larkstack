@@ -32,6 +32,7 @@
 | :--- | :--- | :--- |
 | `POST` | `/webhook` | 接收 Linear Webhook |
 | `POST` | `/lark/event` | 飞书事件回调 (Challenge 验证 + 链接预览) |
+| `POST` | `/github/webhook` | 接收 GitHub Webhook |
 | `GET`  | `/health` | 健康检查 |
 
 ## 快速开始

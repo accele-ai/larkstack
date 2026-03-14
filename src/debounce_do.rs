@@ -117,7 +117,7 @@ impl DurableObject for DebounceObject {
 
         // Send DM via the Linear DM bot (enterprise self-built app).
         if let Some(email) = &dm_email {
-            let app_id = self.env.var("LARK_APP_ID").ok().map(|v| v.to_string());
+            let app_id = self.env.secret("LARK_APP_ID").ok().map(|s| s.to_string());
             let app_secret = self
                 .env
                 .secret("LARK_APP_SECRET")

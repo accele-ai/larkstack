@@ -20,7 +20,7 @@ platform dashboard. On Cloudflare Workers, use `wrangler.toml` vars and `wrangle
 | `LINEAR_API_KEY` | Optional | GraphQL API access — enables link previews |
 | `LARK_VERIFICATION_TOKEN` | Optional | Lark event callback verification |
 | `PORT` | No | Listen port, defaults to `3000` (ignored on CF Workers) |
-| `DEBOUNCE_DELAY_MS` | No | Debounce window in ms, defaults to `5000` |
+| `DEBOUNCE_DELAY_MS` | No | Debounce window in ms, defaults to `30000` |
 
 ## Feature Tiers
 

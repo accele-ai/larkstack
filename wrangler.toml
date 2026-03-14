@@ -10,7 +10,7 @@ bindings = [{ name = "DEBOUNCER", class_name = "DebounceObject" }]
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["DebounceObject"]
+new_classes = ["DebounceObject"]
 
 [vars]
 PORT = "3000"

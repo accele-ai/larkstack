@@ -32,6 +32,7 @@
 | :--- | :--- | :--- |
 | `POST` | `/webhook` | Linear webhook receiver |
 | `POST` | `/lark/event` | Lark event callback (challenge + link preview) |
+| `POST` | `/github/webhook` | GitHub webhook receiver |
 | `GET`  | `/health` | Health check |
 
 ## Quick Start

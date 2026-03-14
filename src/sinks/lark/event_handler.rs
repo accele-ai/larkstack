@@ -140,7 +140,12 @@ pub async fn lark_event_handler(
         }
     }
 
-    info!("lark event received: {body_value}");
+    let event_type_log = body_value
+        .get("header")
+        .and_then(|h| h.get("event_type"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    info!("lark event received: type={event_type_log}");
 
     let event_type = body_value
         .get("header")
