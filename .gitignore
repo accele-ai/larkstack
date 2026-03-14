@@ -33,3 +33,5 @@ Thumbs.db
 payload.json
 .dev.vars
 .wrangler/
+commits-detail.txt
+commits.txt

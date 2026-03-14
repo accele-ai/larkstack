@@ -10,6 +10,13 @@ use crate::{
 
 use super::models::{LarkCard, LarkHeader, LarkMessage, LarkTitle};
 
+/// Max characters for description / comment body in cards.
+const BODY_TRUNCATE_LEN: usize = 200;
+/// Max characters for issue description in compact issue cards.
+const DESC_TRUNCATE_LEN: usize = 150;
+/// Max characters for inline preview titles.
+const INLINE_TITLE_TRUNCATE_LEN: usize = 30;
+
 /// Returns the Lark header color template for a given priority.
 fn priority_color(priority: &Priority) -> &'static str {
     match priority {
@@ -324,7 +331,7 @@ pub fn build_preview_card(issue: &LinearIssueData) -> LarkCard {
     if let Some(desc) = &issue.description {
         let trimmed = desc.trim();
         if !trimmed.is_empty() {
-            elements.push(md_div(&truncate(trimmed, 200)));
+            elements.push(md_div(&truncate(trimmed, BODY_TRUNCATE_LEN)));
         }
     }
 
@@ -373,7 +380,10 @@ fn build_issue_card(
     let has_desc = if let Some(desc) = description {
         let trimmed = desc.trim();
         if !trimmed.is_empty() {
-            elements.push(md_div(&format!("*{}*", truncate(trimmed, 150))));
+            elements.push(md_div(&format!(
+                "*{}*",
+                truncate(trimmed, DESC_TRUNCATE_LEN)
+            )));
             true
         } else {
             false
@@ -418,7 +428,7 @@ fn build_comment_card(
         "**{author}** commented on **{issue_ref}**"
     )));
 
-    let body = truncate(body.trim(), 200);
+    let body = truncate(body.trim(), BODY_TRUNCATE_LEN);
     if !body.is_empty() {
         elements.push(md_div(&body));
     }
@@ -620,7 +630,7 @@ pub fn build_x_preview_card(tweet: &TweetData) -> (LarkCard, String) {
     if !tweet.text.is_empty() {
         elements.push(json!({
             "tag": "markdown",
-            "content": truncate(&tweet.text, 200),
+            "content": truncate(&tweet.text, BODY_TRUNCATE_LEN),
         }));
     }
 
@@ -658,7 +668,11 @@ pub fn build_x_preview_card(tweet: &TweetData) -> (LarkCard, String) {
     };
 
     let inline_title = if !author_at.is_empty() && !tweet.text.is_empty() {
-        format!("{}: {}...", author_at, truncate(&tweet.text, 30))
+        format!(
+            "{}: {}...",
+            author_at,
+            truncate(&tweet.text, INLINE_TITLE_TRUNCATE_LEN)
+        )
     } else if !author_at.is_empty() {
         format!("Post by {author_at}")
     } else {
