@@ -35,4 +35,4 @@ Thumbs.db
 # 6. Zensical doc site build output
 # ------------------------------------------------------
 site/
-.zensical-cache/
+.zensical-cache/__pycache__/
