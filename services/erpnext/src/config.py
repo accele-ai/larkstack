@@ -16,11 +16,21 @@ class ERPNextSettings(BaseSettings):
     api_secret: str
 
 
+class KeycloakSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="KEYCLOAK_", env_file=".env", extra="ignore")
+
+    url: str
+    realm: str
+    client_id: str
+    client_secret: str
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="BRIDGE_", env_file=".env", extra="ignore")
 
     lark: LarkSettings = LarkSettings()  # type: ignore[call-arg]
     erpnext: ERPNextSettings = ERPNextSettings()  # type: ignore[call-arg]
+    keycloak: KeycloakSettings = KeycloakSettings()  # type: ignore[call-arg]
     expense_approval_code: str = ""
     company: str = ""
     company_abbr: str = ""

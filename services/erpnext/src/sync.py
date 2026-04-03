@@ -1,6 +1,5 @@
-"""Lark → ERPNext employee & department sync."""
+"""Lark → ERPNext + Keycloak sync."""
 
-import json
 import logging
 from dataclasses import dataclass
 
@@ -11,6 +10,7 @@ from lark_oapi.api.contact.v3 import (
 )
 
 from .erpnext_client import ERPNextClient
+from .keycloak_client import KeycloakClient
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class LarkUser:
     mobile: str
     department_ids: list[str]
     job_title: str
+    employee_no: str
     is_active: bool
 
 
@@ -38,7 +39,6 @@ def _build_client(app_id: str, app_secret: str) -> lark.Client:
 
 
 def fetch_all_departments(app_id: str, app_secret: str) -> list[LarkDepartment]:
-    """Fetch all departments from Lark."""
     client = _build_client(app_id, app_secret)
     departments = []
     page_token = None
@@ -75,7 +75,6 @@ def fetch_all_departments(app_id: str, app_secret: str) -> list[LarkDepartment]:
 
 
 def fetch_all_users(app_id: str, app_secret: str) -> list[LarkUser]:
-    """Fetch all users from Lark."""
     client = _build_client(app_id, app_secret)
     users = []
     page_token = None
@@ -103,6 +102,7 @@ def fetch_all_users(app_id: str, app_secret: str) -> list[LarkUser]:
                 mobile=u.mobile or "",
                 department_ids=u.department_ids or [],
                 job_title=u.job_title or "",
+                employee_no=u.employee_no or "",
                 is_active=bool(u.status and u.status.is_activated),
             ))
 
@@ -118,9 +118,7 @@ async def sync_departments(
     erpnext: ERPNextClient,
     departments: list[LarkDepartment],
     company: str,
-    company_abbr: str,
 ):
-    """Sync departments to ERPNext."""
     for dept in departments:
         existing = await erpnext.find_department_by_name(dept.name, company)
         if existing:
@@ -130,15 +128,19 @@ async def sync_departments(
         log.info("Created department: %s", dept.name)
 
 
+def _username_from_email(email: str) -> str:
+    return email.split("@")[0] if email else ""
+
+
 async def sync_employees(
     erpnext: ERPNextClient,
+    keycloak: KeycloakClient | None,
     users: list[LarkUser],
     departments: list[LarkDepartment],
     company: str,
 ):
-    """Sync users to ERPNext as employees."""
     dept_map = {d.open_department_id: d.name for d in departments}
-    created, updated, skipped = 0, 0, 0
+    erp_created, erp_updated, kc_created, kc_updated, skipped = 0, 0, 0, 0, 0
 
     for user in users:
         dept_name = ""
@@ -147,41 +149,81 @@ async def sync_employees(
                 dept_name = dept_map[did]
                 break
 
-        existing = await erpnext.find_employee_by_lark_open_id(user.open_id)
+        status = "Active" if user.is_active else "Left"
 
-        if existing:
+        # ── ERPNext sync ──
+        existing_erp = await erpnext.find_employee_by_lark_open_id(user.open_id)
+        if existing_erp:
             changed = await erpnext.update_employee_if_changed(
-                employee_id=existing,
-                name=user.name,
-                email=user.email,
-                job_title=user.job_title,
-                department=dept_name,
-                status="Active" if user.is_active else "Left",
+                employee_id=existing_erp,
+                name=user.name, email=user.email,
+                job_title=user.job_title, department=dept_name, status=status,
             )
             if changed:
-                updated += 1
+                erp_updated += 1
             else:
                 skipped += 1
         else:
             await erpnext.create_employee(
-                name=user.name,
-                email=user.email,
-                lark_open_id=user.open_id,
-                company=company,
-                department=dept_name,
-                job_title=user.job_title,
+                name=user.name, email=user.email,
+                lark_open_id=user.open_id, company=company,
+                department=dept_name, job_title=user.job_title,
             )
-            created += 1
+            erp_created += 1
 
-    log.info("Employee sync done: created=%d updated=%d unchanged=%d", created, updated, skipped)
+        # ── Keycloak sync ──
+        if keycloak and user.email:
+            username = _username_from_email(user.email)
+            kc_user_id = await keycloak.find_user_by_lark_open_id(user.open_id)
+            if not kc_user_id:
+                kc_user_id = await keycloak.find_user_by_email(user.email)
+
+            kc_attrs: dict[str, list[str]] = {
+                "lark_open_id": [user.open_id],
+                "full_name": [user.name],
+            }
+            if user.employee_no:
+                kc_attrs["employee_id"] = [user.employee_no]
+            elif not kc_user_id:
+                # New user without employee_no — use open_id suffix as placeholder
+                kc_attrs["employee_id"] = [user.open_id[-8:]]
+
+            if kc_user_id:
+                await keycloak.update_user(
+                    kc_user_id,
+                    firstName=user.name,
+                    email=user.email,
+                    enabled=user.is_active,
+                    attributes=kc_attrs,
+                )
+                kc_updated += 1
+            else:
+                await keycloak.create_user(
+                    username=username,
+                    email=user.email,
+                    first_name=user.name,
+                    attributes=kc_attrs,
+                    enabled=user.is_active,
+                )
+                kc_created += 1
+
+    log.info(
+        "Sync done: ERPNext(created=%d updated=%d) Keycloak(created=%d updated=%d) unchanged=%d",
+        erp_created, erp_updated, kc_created, kc_updated, skipped,
+    )
 
 
-async def full_sync(app_id: str, app_secret: str, erpnext: ERPNextClient, company: str, company_abbr: str):
-    """Run a full sync: departments then employees."""
+async def full_sync(
+    app_id: str,
+    app_secret: str,
+    erpnext: ERPNextClient,
+    keycloak: KeycloakClient | None,
+    company: str,
+):
     log.info("Starting full sync...")
     departments = fetch_all_departments(app_id, app_secret)
-    await sync_departments(erpnext, departments, company, company_abbr)
+    await sync_departments(erpnext, departments, company)
 
     users = fetch_all_users(app_id, app_secret)
-    await sync_employees(erpnext, users, departments, company)
+    await sync_employees(erpnext, keycloak, users, departments, company)
     log.info("Full sync complete.")
