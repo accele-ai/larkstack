@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class LarkUser:
     open_id: str
+    user_id: str
     name: str
     email: str
     mobile: str
@@ -97,6 +98,7 @@ def fetch_all_users(app_id: str, app_secret: str) -> list[LarkUser]:
         for u in resp.data.items or []:
             users.append(LarkUser(
                 open_id=u.open_id,
+                user_id=u.user_id or "",
                 name=u.name,
                 email=u.email or "",
                 mobile=u.mobile or "",
@@ -178,15 +180,12 @@ async def sync_employees(
             if not kc_user_id:
                 kc_user_id = await keycloak.find_user_by_email(user.email)
 
+            emp_id = user.employee_no or user.user_id or user.open_id[-8:]
             kc_attrs: dict[str, list[str]] = {
                 "lark_open_id": [user.open_id],
                 "full_name": [user.name],
+                "employee_id": [emp_id],
             }
-            if user.employee_no:
-                kc_attrs["employee_id"] = [user.employee_no]
-            elif not kc_user_id:
-                # New user without employee_no — use open_id suffix as placeholder
-                kc_attrs["employee_id"] = [user.open_id[-8:]]
 
             if kc_user_id:
                 await keycloak.update_user(
