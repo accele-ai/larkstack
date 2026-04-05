@@ -128,10 +128,12 @@ def _extract_detail_rows(widgets: dict, names: list[str]) -> list[dict]:
         content = _extract_text(row_by_name, ["内容", "摘要", "描述"])
         raw_date = _extract_text(row_by_name, ["日期（年-月-日）", "日期", "消费日期"])
         amount = _extract_amount(row_by_name, ["金额", "费用金额"])
+        row_attachments = _extract_attachments(row_by_name, ["发票", "附件", "电子发票"])
         details.append({
             "content": content,
             "date": _to_date_str(raw_date),
             "amount": amount,
+            "attachments": row_attachments,
         })
 
     return details

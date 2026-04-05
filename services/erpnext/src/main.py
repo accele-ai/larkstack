@@ -127,7 +127,12 @@ async def process_approved_expense(instance_code: str):
             remark=f"{expense['type_text']} - {expense['reason']}\n飞书审批: {instance_code}",
         )
 
-        for att in expense["attachments"]:
+        # Collect all attachments: top-level + per-detail-row
+        all_attachments = list(expense["attachments"])
+        for d in expense.get("details", []):
+            all_attachments.extend(d.get("attachments", []))
+
+        for att in all_attachments:
             await erpnext.attach_file(claim["name"], att["url"], att["name"])
 
         await erpnext.submit_expense_claim(claim["name"])

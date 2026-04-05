@@ -78,17 +78,19 @@ class ERPNextClient:
                 file_content = dl_resp.content
                 content_type = dl_resp.headers.get("content-type", "application/octet-stream")
 
-            # Upload to ERPNext
-            resp = await self._client.post(
-                "/api/method/upload_file",
-                data={
-                    "doctype": "Expense Claim",
-                    "docname": docname,
-                    "is_private": "1",
-                },
-                files={"file": (filename, file_content, content_type)},
-                headers={"Content-Type": None},  # let httpx set multipart boundary
-            )
+            # Upload to ERPNext (use a separate client without pre-set Content-Type)
+            upload_headers = {"Authorization": self._client.headers["Authorization"]}
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=30) as upload_client:
+                resp = await upload_client.post(
+                    "/api/method/upload_file",
+                    data={
+                        "doctype": "Expense Claim",
+                        "docname": docname,
+                        "is_private": "1",
+                    },
+                    files={"file": (filename, file_content, content_type)},
+                    headers=upload_headers,
+                )
             if resp.is_success:
                 log.info("Attached %s to %s", filename, docname)
             else:
