@@ -66,19 +66,26 @@ class ERPNextClient:
         log.info("Submitted Expense Claim %s", name)
         return resp.json()["data"]
 
-    async def attach_file(self, docname: str, file_url: str, filename: str) -> None:
-        """Download file from URL and upload to ERPNext as attachment."""
+    async def upload_and_attach_file(
+        self, docname: str, file_url: str, filename: str, *, detail_row_name: str = "",
+    ) -> str | None:
+        """Download file from URL, upload to ERPNext, optionally link to detail row's invoice field.
+
+        Returns the uploaded file_url on success, None on failure.
+        """
         try:
-            # Download file content from Lark
             async with httpx.AsyncClient(timeout=30, follow_redirects=True) as dl:
                 dl_resp = await dl.get(file_url)
                 if not dl_resp.is_success:
                     log.warning("Failed to download %s: %s", filename, dl_resp.status_code)
-                    return
+                    return None
                 file_content = dl_resp.content
                 content_type = dl_resp.headers.get("content-type", "application/octet-stream")
 
-            # Upload to ERPNext (use a separate client without pre-set Content-Type)
+            # Prefix filename with docname for uniqueness and organization
+            filename = f"{docname}_{filename}"
+            folder = f"Home/expense-claims/{docname}"
+            await self._ensure_folder(folder)
             upload_headers = {"Authorization": self._client.headers["Authorization"]}
             async with httpx.AsyncClient(base_url=self.base_url, timeout=30) as upload_client:
                 resp = await upload_client.post(
@@ -86,17 +93,50 @@ class ERPNextClient:
                     data={
                         "doctype": "Expense Claim",
                         "docname": docname,
+                        "folder": folder,
                         "is_private": "1",
                     },
                     files={"file": (filename, file_content, content_type)},
                     headers=upload_headers,
                 )
-            if resp.is_success:
-                log.info("Attached %s to %s", filename, docname)
-            else:
+
+            if not resp.is_success:
                 log.warning("Failed to upload %s to %s: %s", filename, docname, resp.text[:200])
+                return None
+
+            uploaded_url = resp.json().get("message", {}).get("file_url", "")
+            log.info("Uploaded %s to %s → %s", filename, docname, uploaded_url)
+
+            # Link to expense detail row's invoice field
+            if detail_row_name and uploaded_url:
+                await self._client.put(
+                    f"/api/resource/Expense Claim Detail/{detail_row_name}",
+                    json={"invoice": uploaded_url},
+                )
+                log.info("Linked %s to detail row %s", filename, detail_row_name)
+
+            return uploaded_url
         except Exception as e:
             log.warning("Failed to attach %s to %s: %s", filename, docname, e)
+            return None
+
+    async def _ensure_folder(self, folder_path: str) -> None:
+        """Create nested Frappe File folders if they don't exist."""
+        parts = folder_path.split("/")
+        for i in range(1, len(parts) + 1):
+            path = "/".join(parts[:i])
+            check = await self._client.get(
+                "/api/resource/File",
+                params={"filters": f'[["name","=","{path}"]]', "fields": '["name"]', "limit_page_length": 1},
+            )
+            if check.is_success and check.json().get("data"):
+                continue
+            resp = await self._client.post(
+                "/api/resource/File",
+                json={"doctype": "File", "file_name": parts[i - 1], "is_folder": 1, "folder": "/".join(parts[: i - 1]) or "Home"},
+            )
+            if resp.is_success:
+                log.debug("Created folder: %s", path)
 
     # ── Employee ───────────────────────────────────────────
 
