@@ -28,15 +28,18 @@ class ERPNextClient:
         *,
         remark: str = "",
     ) -> dict:
+        from datetime import date as dt_date
+
         payload = {
             "doctype": "Expense Claim",
             "employee": employee,
             "expense_type": expenses[0]["expense_type"] if expenses else "Miscellaneous",
+            "exchange_rate": 1,
             "expenses": [
                 {
                     "expense_type": e["expense_type"],
                     "amount": e["amount"],
-                    "expense_date": e.get("date", ""),
+                    "expense_date": e.get("date") or str(dt_date.today()),
                     "description": e.get("description", ""),
                 }
                 for e in expenses
@@ -55,7 +58,7 @@ class ERPNextClient:
     async def submit_expense_claim(self, name: str) -> dict:
         resp = await self._client.put(
             f"/api/resource/Expense Claim/{name}",
-            json={"docstatus": 1},
+            json={"docstatus": 1, "approval_status": "Approved"},
         )
         resp.raise_for_status()
         log.info("Submitted Expense Claim %s", name)
