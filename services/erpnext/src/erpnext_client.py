@@ -49,6 +49,8 @@ class ERPNextClient:
             payload["remark"] = remark
 
         resp = await self._client.post("/api/resource/Expense Claim", json=payload)
+        if not resp.is_success:
+            log.error("Expense Claim creation failed: %s %s", resp.status_code, resp.text[:300])
         resp.raise_for_status()
         result = resp.json()
         claim_name = result["data"]["name"]
@@ -65,20 +67,34 @@ class ERPNextClient:
         return resp.json()["data"]
 
     async def attach_file(self, docname: str, file_url: str, filename: str) -> None:
-        resp = await self._client.post(
-            "/api/method/upload_file",
-            json={
-                "doctype": "Expense Claim",
-                "docname": docname,
-                "file_url": file_url,
-                "filename": filename,
-                "is_private": 1,
-            },
-        )
-        if resp.is_success:
-            log.info("Attached %s to %s", filename, docname)
-        else:
-            log.warning("Failed to attach %s to %s: %s", filename, docname, resp.text)
+        """Download file from URL and upload to ERPNext as attachment."""
+        try:
+            # Download file content from Lark
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as dl:
+                dl_resp = await dl.get(file_url)
+                if not dl_resp.is_success:
+                    log.warning("Failed to download %s: %s", filename, dl_resp.status_code)
+                    return
+                file_content = dl_resp.content
+                content_type = dl_resp.headers.get("content-type", "application/octet-stream")
+
+            # Upload to ERPNext
+            resp = await self._client.post(
+                "/api/method/upload_file",
+                data={
+                    "doctype": "Expense Claim",
+                    "docname": docname,
+                    "is_private": "1",
+                },
+                files={"file": (filename, file_content, content_type)},
+                headers={"Content-Type": None},  # let httpx set multipart boundary
+            )
+            if resp.is_success:
+                log.info("Attached %s to %s", filename, docname)
+            else:
+                log.warning("Failed to upload %s to %s: %s", filename, docname, resp.text[:200])
+        except Exception as e:
+            log.warning("Failed to attach %s to %s: %s", filename, docname, e)
 
     # ── Employee ───────────────────────────────────────────
 

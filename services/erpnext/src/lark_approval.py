@@ -6,6 +6,9 @@ so the code works across different approval templates without hardcoding.
 
 import json
 import logging
+from datetime import date
+
+from dateutil.parser import parse as parse_date
 
 log = logging.getLogger(__name__)
 
@@ -25,8 +28,6 @@ EXPENSE_TYPE_MAP = {
 def parse_expense_form(form_json: str | list) -> dict:
     """Parse Lark approval form into structured expense data.
 
-    Matches widgets by `name` (label) to be resilient to widget ID changes.
-
     Returns:
         {
             "expense_type": "Travel",
@@ -40,19 +41,10 @@ def parse_expense_form(form_json: str | list) -> dict:
     form = json.loads(form_json) if isinstance(form_json, str) else form_json
     widgets = {w.get("name", ""): w for w in form}
 
-    # Expense type — match common label names
     type_text = _extract_radio(widgets, ["报销类型", "费用类型", "类型"])
-
-    # Reason
     reason = _extract_text(widgets, ["报销事由", "事由", "说明", "备注"])
-
-    # Total (formula/amount field)
     total = _extract_amount(widgets, ["费用汇总", "合计", "总金额", "总计"])
-
-    # Detail rows (fieldList)
     details = _extract_detail_rows(widgets, ["费用明细", "明细", "报销明细"])
-
-    # Attachments
     attachments = _extract_attachments(widgets, ["电子发票", "发票", "附件", "发票照片"])
 
     return {
@@ -66,7 +58,6 @@ def parse_expense_form(form_json: str | list) -> dict:
 
 
 def _find_widget(widgets: dict, candidate_names: list[str]) -> dict:
-    """Find the first widget matching any of the candidate names."""
     for name in candidate_names:
         if name in widgets:
             return widgets[name]
@@ -76,19 +67,44 @@ def _find_widget(widgets: dict, candidate_names: list[str]) -> dict:
 def _extract_radio(widgets: dict, names: list[str]) -> str:
     w = _find_widget(widgets, names)
     value = w.get("value")
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return value.get("text", value.get("value", ""))
     if isinstance(value, list):
-        return value[0] if value else ""
-    return str(value) if value else ""
+        first = value[0] if value else ""
+        return first.get("text", str(first)) if isinstance(first, dict) else str(first)
+    return str(value)
 
 
 def _extract_text(widgets: dict, names: list[str]) -> str:
-    return str(_find_widget(widgets, names).get("value", ""))
+    value = _find_widget(widgets, names).get("value")
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _to_date_str(raw: str) -> str:
+    """Parse any date format into YYYY-MM-DD string."""
+    if not raw:
+        return str(date.today())
+    try:
+        return parse_date(raw).strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        # Fallback: try to extract YYYY-MM-DD prefix
+        if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+            return raw[:10]
+        return str(date.today())
 
 
 def _extract_amount(widgets: dict, names: list[str]) -> float:
-    raw = _find_widget(widgets, names).get("value", "0")
-    try:
+    raw = _find_widget(widgets, names).get("value")
+    if raw is None:
+        return 0.0
+    if isinstance(raw, (int, float)):
         return float(raw)
+    try:
+        return float(str(raw).replace(",", ""))
     except (ValueError, TypeError):
         return 0.0
 
@@ -108,11 +124,15 @@ def _extract_detail_rows(widgets: dict, names: list[str]) -> list[dict]:
     for row in value:
         if not isinstance(row, list):
             continue
-        row_by_name = {item.get("name", ""): item for item in row}
+        row_by_name = {item.get("name", ""): item for item in row if isinstance(item, dict)}
         content = _extract_text(row_by_name, ["内容", "摘要", "描述"])
-        date = _extract_text(row_by_name, ["日期（年-月-日）", "日期", "消费日期"])
+        raw_date = _extract_text(row_by_name, ["日期（年-月-日）", "日期", "消费日期"])
         amount = _extract_amount(row_by_name, ["金额", "费用金额"])
-        details.append({"content": content, "date": date, "amount": amount})
+        details.append({
+            "content": content,
+            "date": _to_date_str(raw_date),
+            "amount": amount,
+        })
 
     return details
 
@@ -127,4 +147,13 @@ def _extract_attachments(widgets: dict, names: list[str]) -> list[dict]:
             return []
     if not isinstance(value, list):
         return []
-    return [{"url": f["url"], "name": f.get("name", "invoice")} for f in value if isinstance(f, dict) and f.get("url")]
+
+    ext = w.get("ext", "")
+    result = []
+    for i, f in enumerate(value):
+        if isinstance(f, str) and f.startswith("http"):
+            fname = ext if isinstance(ext, str) and ext else f"attachment_{i}"
+            result.append({"url": f, "name": fname})
+        elif isinstance(f, dict) and f.get("url"):
+            result.append({"url": f["url"], "name": f.get("name", f"attachment_{i}")})
+    return result
