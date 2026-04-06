@@ -164,17 +164,18 @@ async def process_approved_expense(instance_code: str):
                                     json=ocr_data,
                                 )
                                 log.info("OCR data written to row %s", row_name)
-                                ocr_summaries.append(InvoiceOCRClient.format_comment(result))
+                                ocr_summaries.append(result)
 
         # Attach top-level attachments
         for att in expense["attachments"]:
             await erpnext.upload_and_attach_file(claim["name"], att["url"], att["name"])
 
-        # Write OCR validation summary to Expense Claim
+        # Write OCR results as structured JSON to Expense Claim
         if ocr_summaries:
+            import json as _json
             await erpnext._client.put(
                 f"/api/resource/Expense Claim/{claim['name']}",
-                json={"ocr_validation": "\n---\n".join(ocr_summaries)},
+                json={"ocr_validation": _json.dumps(ocr_summaries, ensure_ascii=False)},
             )
 
         await erpnext.submit_expense_claim(claim["name"])
@@ -227,19 +228,31 @@ async def process_pending_expense(instance_code: str):
                     )
 
         if comments:
-            from lark_oapi.api.approval.v4 import CreateInstanceCommentRequest, InstanceComment
-            client = _get_lark_client()
+            # Lark comment API requires: user_id as query param, content as JSON string
+            import json as _json
             comment_text = "\n\n---\n\n".join(comments)
-            body = InstanceComment.builder().comment(comment_text).build()
-            req = CreateInstanceCommentRequest.builder() \
-                .instance_id(instance_code) \
-                .request_body(body) \
-                .build()
-            resp = client.approval.v4.instance_comment.create(req)
-            if resp.success():
+            content_json = _json.dumps({"text": comment_text})
+
+            # Get token and post directly (SDK doesn't handle user_id query param well)
+            token_resp = await httpx.AsyncClient().post(
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                json={"app_id": settings.lark.app_id, "app_secret": settings.lark.app_secret},
+            )
+            lark_token = token_resp.json().get("tenant_access_token", "")
+
+            open_id = detail.get("open_id", "") or detail.get("user_id", "")
+            async with httpx.AsyncClient() as c:
+                resp = await c.post(
+                    f"https://open.feishu.cn/open-apis/approval/v4/instances/{instance_code}/comments",
+                    params={"user_id_type": "open_id", "user_id": open_id},
+                    headers={"Authorization": f"Bearer {lark_token}", "Content-Type": "application/json"},
+                    json={"content": content_json},
+                )
+            code = resp.json().get("code", -1)
+            if code == 0:
                 log.info("Added OCR comment to instance %s", instance_code)
             else:
-                log.warning("Failed to add comment: %s %s", resp.code, resp.msg)
+                log.warning("Failed to add comment: %s", resp.json().get("msg", ""))
 
     except Exception:
         log.exception("Failed to OCR instance %s", instance_code)
