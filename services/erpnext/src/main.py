@@ -134,18 +134,48 @@ async def process_approved_expense(instance_code: str):
             remark=f"{expense['type_text']} - {expense['reason']}\n飞书审批: {instance_code}",
         )
 
-        # Attach detail-row invoices (linked to the invoice field on each row)
+        # Attach detail-row invoices + OCR
         detail_rows = claim.get("expenses", [])
+        ocr_summaries = []
         for i, d in enumerate(expense.get("details", [])):
             row_name = detail_rows[i]["name"] if i < len(detail_rows) else ""
             for att in d.get("attachments", []):
+                # Upload file
                 await erpnext.upload_and_attach_file(
                     claim["name"], att["url"], att["name"], detail_row_name=row_name,
                 )
+                # OCR the invoice
+                if ocr.enabled and row_name:
+                    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as dl:
+                        dl_resp = await dl.get(att["url"])
+                        if dl_resp.is_success:
+                            result = await ocr.recognize(dl_resp.content, att["name"])
+                            if result:
+                                fields = result.get("fields", {})
+                                ocr_data = {
+                                    "ocr_invoice_code": fields.get("invoice_code", {}).get("value", ""),
+                                    "ocr_invoice_date": fields.get("invoice_date", {}).get("value", ""),
+                                    "ocr_seller": fields.get("seller_name", {}).get("value", ""),
+                                    "ocr_amount": InvoiceOCRClient.extract_amount(result) or 0,
+                                    "ocr_confidence": round(result.get("overall_confidence", 0) * 100, 1),
+                                }
+                                await erpnext._client.put(
+                                    f"/api/resource/Expense Claim Detail/{row_name}",
+                                    json=ocr_data,
+                                )
+                                log.info("OCR data written to row %s", row_name)
+                                ocr_summaries.append(InvoiceOCRClient.format_comment(result))
 
-        # Attach top-level attachments (generic document attachments)
+        # Attach top-level attachments
         for att in expense["attachments"]:
             await erpnext.upload_and_attach_file(claim["name"], att["url"], att["name"])
+
+        # Write OCR validation summary to Expense Claim
+        if ocr_summaries:
+            await erpnext._client.put(
+                f"/api/resource/Expense Claim/{claim['name']}",
+                json={"ocr_validation": "\n---\n".join(ocr_summaries)},
+            )
 
         await erpnext.submit_expense_claim(claim["name"])
         log.info("Expense Claim %s submitted for instance %s", claim["name"], instance_code)
