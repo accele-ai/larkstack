@@ -25,12 +25,20 @@ class KeycloakSettings(BaseSettings):
     client_secret: str
 
 
+class InvoiceOCRSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="INVOICE_OCR_", env_file=".env", extra="ignore")
+
+    url: str = ""
+    token: str = ""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="BRIDGE_", env_file=".env", extra="ignore")
 
     lark: LarkSettings = LarkSettings()  # type: ignore[call-arg]
     erpnext: ERPNextSettings = ERPNextSettings()  # type: ignore[call-arg]
     keycloak: KeycloakSettings = KeycloakSettings()  # type: ignore[call-arg]
+    invoice_ocr: InvoiceOCRSettings = InvoiceOCRSettings()  # type: ignore[call-arg]
     expense_approval_code: str = ""
     company: str = ""
     company_abbr: str = ""

@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 
+import httpx
 import lark_oapi as lark
 from lark_oapi.api.contact.v3 import (
     P2ContactUserCreatedV3,
@@ -20,6 +21,7 @@ from lark_oapi.ws import Client as WSClient
 
 from .config import Settings
 from .erpnext_client import ERPNextClient
+from .invoice_ocr import InvoiceOCRClient
 from .keycloak_client import KeycloakClient
 from .lark_approval import parse_expense_form
 from .sync import full_sync
@@ -40,6 +42,11 @@ keycloak = KeycloakClient(
     realm=settings.keycloak.realm,
     client_id=settings.keycloak.client_id,
     client_secret=settings.keycloak.client_secret,
+)
+
+ocr = InvoiceOCRClient(
+    url=settings.invoice_ocr.url,
+    token=settings.invoice_ocr.token,
 )
 
 _loop: asyncio.AbstractEventLoop | None = None
@@ -146,6 +153,68 @@ async def process_approved_expense(instance_code: str):
         log.exception("Failed to process expense instance %s", instance_code)
 
 
+async def process_pending_expense(instance_code: str):
+    """On PENDING: download invoice attachments, run OCR, add comment to approval."""
+    if not ocr.enabled:
+        return
+    try:
+        detail = await _get_instance_detail(instance_code)
+        if not detail:
+            return
+
+        form_data = detail.get("form", "[]")
+        expense = parse_expense_form(form_data)
+
+        # Collect all attachment URLs
+        all_attachments = list(expense.get("attachments", []))
+        for d in expense.get("details", []):
+            all_attachments.extend(d.get("attachments", []))
+
+        if not all_attachments:
+            log.info("No attachments to OCR for instance %s", instance_code)
+            return
+
+        comments = []
+        for att in all_attachments:
+            # Download file
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as dl:
+                dl_resp = await dl.get(att["url"])
+                if not dl_resp.is_success:
+                    continue
+                file_content = dl_resp.content
+
+            # Run OCR
+            result = await ocr.recognize(file_content, att["name"])
+            if result:
+                comments.append(InvoiceOCRClient.format_comment(result))
+
+                # Verify amount matches
+                ocr_amount = InvoiceOCRClient.extract_amount(result)
+                claimed = expense.get("total", 0)
+                if ocr_amount and claimed and abs(ocr_amount - claimed) > 0.01:
+                    comments.append(
+                        f"⚠️ **金额不一致**: 发票 ¥{ocr_amount:.2f} vs 申报 ¥{claimed:.2f}"
+                    )
+
+        if comments:
+            from lark_oapi.api.approval.v4 import CreateInstanceCommentRequest, InstanceComment
+            client = _get_lark_client()
+            comment_text = "\n\n---\n\n".join(comments)
+            body = InstanceComment.builder().comment(comment_text).build()
+            req = CreateInstanceCommentRequest.builder() \
+                .instance_id(instance_code) \
+                .request_body(body) \
+                .build()
+            resp = client.approval.v4.instance_comment.create(req)
+            if resp.success():
+                log.info("Added OCR comment to instance %s", instance_code)
+            else:
+                log.warning("Failed to add comment: %s %s", resp.code, resp.msg)
+
+    except Exception:
+        log.exception("Failed to OCR instance %s", instance_code)
+
+
 def handle_approval_instance(event: CustomizedEvent):
     data = event.event
     status = data.get("status", "")
@@ -154,12 +223,13 @@ def handle_approval_instance(event: CustomizedEvent):
 
     log.info("Approval event: code=%s instance=%s status=%s", approval_code, instance_code, status)
 
-    if status != "APPROVED":
-        return
     if settings.expense_approval_code and approval_code != settings.expense_approval_code:
         return
 
-    _run_async(process_approved_expense(instance_code))
+    if status == "PENDING":
+        _run_async(process_pending_expense(instance_code))
+    elif status == "APPROVED":
+        _run_async(process_approved_expense(instance_code))
 
 
 # ── Contact event handlers (real-time sync to ERPNext + Keycloak) ──
